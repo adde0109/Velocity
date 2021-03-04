@@ -38,6 +38,9 @@ import com.velocitypowered.proxy.protocol.packet.PluginMessage;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackRequest;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackResponse;
 import com.velocitypowered.proxy.protocol.packet.Respawn;
+import com.velocitypowered.proxy.protocol.packet.ScoreboardDisplayObjective;
+import com.velocitypowered.proxy.protocol.packet.ScoreboardObjective;
+import com.velocitypowered.proxy.protocol.packet.ScoreboardScore;
 import com.velocitypowered.proxy.protocol.packet.ServerLogin;
 import com.velocitypowered.proxy.protocol.packet.ServerLoginSuccess;
 import com.velocitypowered.proxy.protocol.packet.SetCompression;
@@ -46,6 +49,7 @@ import com.velocitypowered.proxy.protocol.packet.StatusRequest;
 import com.velocitypowered.proxy.protocol.packet.StatusResponse;
 import com.velocitypowered.proxy.protocol.packet.TabCompleteRequest;
 import com.velocitypowered.proxy.protocol.packet.TabCompleteResponse;
+import com.velocitypowered.proxy.protocol.packet.TeamPacket;
 import com.velocitypowered.proxy.protocol.packet.TitlePacket;
 import io.netty.buffer.ByteBuf;
 
@@ -204,6 +208,22 @@ public interface MinecraftSessionHandler {
   }
 
   default boolean handle(ResourcePackResponse packet) {
+    return false;
+  }
+
+  default boolean handle(TeamPacket packet) {
+    return false;
+  }
+
+  default boolean handle(ScoreboardDisplayObjective packet) {
+    return false;
+  }
+
+  default boolean handle(ScoreboardScore packet) {
+    return false;
+  }
+
+  default boolean handle(ScoreboardObjective packet) {
     return false;
   }
 }
