@@ -43,7 +43,9 @@ import java.util.UUID;
 
 import net.kyori.adventure.nbt.BinaryTagIO;
 import net.kyori.adventure.nbt.CompoundBinaryTag;
+import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 
 public enum ProtocolUtils {
   ;
@@ -60,6 +62,7 @@ public enum ProtocolUtils {
           .build();
 
   private static final int DEFAULT_MAX_STRING_SIZE = 65536; // 64KiB
+  private static final int JSON_COMPONENT_MAX_STRING_SIZE = 262144;
   private static final QuietDecoderException BAD_VARINT_CACHED =
       new QuietDecoderException("Bad VarInt decoded");
   private static final int[] VARINT_EXACT_BYTE_LENGTHS = new int[33];
@@ -204,6 +207,22 @@ public enum ProtocolUtils {
    * @param str the string to write
    */
   public static void writeString(ByteBuf buf, CharSequence str) {
+    // Thank SpotBugs for this:
+    if (str == null) {
+      throw new IllegalArgumentException("Bad String (null)");
+    }
+    writeString(buf, str, DEFAULT_MAX_STRING_SIZE);
+  }
+
+  /**
+   * Writes the specified {@code str} to the {@code buf} with a VarInt prefix.
+   * @param buf the buffer to write to
+   * @param str the string to write
+   * @param maxLen the maximum allowed length
+   */
+  public static void writeString(ByteBuf buf, CharSequence str, int maxLen) {
+    checkFrame(str.length() < maxLen,
+            "Bad string length (got %s, maximum is %s)", str.length(), maxLen);
     int size = ByteBufUtil.utf8Bytes(str);
     writeVarInt(buf, size);
     buf.writeCharSequence(str, StandardCharsets.UTF_8);
@@ -311,6 +330,60 @@ public enum ProtocolUtils {
   }
 
   /**
+   * Reads a json or legacy scoreboard text component from the {@code buf}.
+   * @param buf the buffer to read from
+   * @param protocolVersion the game version
+   * @return {@link net.kyori.adventure.text.Component} the Component from the buffer
+   */
+  public static Component readScoreboardComponent(ByteBuf buf, ProtocolVersion protocolVersion) {
+    return readScoreboardComponent(buf, protocolVersion, JSON_COMPONENT_MAX_STRING_SIZE);
+  }
+
+  /**
+   * Reads a json or legacy scoreboard text component from the {@code buf}.
+   * @param buf the buffer to read from
+   * @param protocolVersion the game version
+   * @param maxLen maximum expected length of the input String
+   * @return {@link net.kyori.adventure.text.Component} the Component from the buffer
+   */
+  public static Component readScoreboardComponent(ByteBuf buf, ProtocolVersion protocolVersion,
+                                               int maxLen) {
+    String read = readString(buf, maxLen);
+    if (protocolVersion.compareTo(ProtocolVersion.MINECRAFT_1_13) >= 0) {
+      return getJsonChatSerializer(protocolVersion).deserialize(read);
+    } else {
+      return LegacyComponentSerializer.legacySection().deserialize(read);
+    }
+  }
+
+  /**
+   * Writes a generic (legacy/json) text component to the {@code buf}.
+   * @param buf the buffer to write to
+   * @param component the
+   * @param protocolVersion the game version
+   */
+  public static void writeScoreboardComponent(ByteBuf buf, Component component,
+                                           ProtocolVersion protocolVersion) {
+    writeScoreboardComponent(buf, component, protocolVersion, JSON_COMPONENT_MAX_STRING_SIZE);
+  }
+
+  /**
+   * Writes a scoreboard (legacy/json) text component to the {@code buf}.
+   * @param buf the buffer to write to
+   * @param component the
+   * @param protocolVersion the game version
+   * @param maxLen maximum expected length of the input String
+   */
+  public static void writeScoreboardComponent(ByteBuf buf, Component component,
+                                               ProtocolVersion protocolVersion, int maxLen) {
+    if (protocolVersion.compareTo(ProtocolVersion.MINECRAFT_1_13) >= 0) {
+      writeString(buf, getJsonChatSerializer(protocolVersion).serialize(component), maxLen);
+    } else {
+      writeString(buf, LegacyComponentSerializer.legacySection().serialize(component), maxLen);
+    }
+  }
+
+  /**
    * Writes a CompoundTag to the {@code buf}.
    * @param buf the buffer to write to
    * @param compoundTag the CompoundTag to write
@@ -324,17 +397,31 @@ public enum ProtocolUtils {
   }
 
   /**
+   * Reads a legacy short-indexed String array from the {@code buf}.
+   * @param buf the buffer to read from
+   * @return the String array from the buffer
+   */
+  public static String[] readStringArray17(ByteBuf buf) {
+    return readStringArrayImpl(buf, buf.readShort());
+  }
+
+  /**
+   * Writes a legacy short-indexed String Array to the {@code buf}.
+   * @param buf the buffer to write to
+   * @param stringArray the array to write
+   */
+  public static void writeStringArray17(ByteBuf buf, String[] stringArray) {
+    buf.writeShort(stringArray.length);
+    writeStringArrayImply(buf, stringArray);
+  }
+
+  /**
    * Reads a String array from the {@code buf}.
    * @param buf the buffer to read from
    * @return the String array from the buffer
    */
   public static String[] readStringArray(ByteBuf buf) {
-    int length = readVarInt(buf);
-    String[] ret = new String[length];
-    for (int i = 0; i < length; i++) {
-      ret[i] = readString(buf);
-    }
-    return ret;
+    return readStringArrayImpl(buf, readVarInt(buf));
   }
 
   /**
@@ -344,6 +431,18 @@ public enum ProtocolUtils {
    */
   public static void writeStringArray(ByteBuf buf, String[] stringArray) {
     writeVarInt(buf, stringArray.length);
+    writeStringArrayImply(buf, stringArray);
+  }
+
+  private static String[] readStringArrayImpl(ByteBuf buf, int length) {
+    String[] ret = new String[length];
+    for (int i = 0; i < length; i++) {
+      ret[i] = readString(buf);
+    }
+    return ret;
+  }
+
+  private static void writeStringArrayImply(ByteBuf buf, String[] stringArray) {
     for (String s : stringArray) {
       writeString(buf, s);
     }
