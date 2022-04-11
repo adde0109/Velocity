@@ -24,13 +24,17 @@ import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.util.except.QuietRuntimeException;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.CorruptedFrameException;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
 
   public static final boolean DEBUG = Boolean.getBoolean("velocity.packet-decode-logging");
+  public static final boolean DUMP_PACKET_BUFFERS =
+          Boolean.getBoolean("velocity.error-dump-packet-buffers");
   private static final QuietRuntimeException DECODE_FAILED =
       new QuietRuntimeException("A packet did not decode successfully (invalid data). If you are a "
           + "developer, launch Velocity with -Dvelocity.packet-decode-logging=true to see more.");
@@ -80,11 +84,11 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
         try {
           packet.decode(buf, direction, registry.version);
         } catch (Exception e) {
-          throw handleDecodeFailure(e, packet, packetId);
+          throw handleDecodeFailure(e, packet, packetId, getFullPacketDump(packet, buf));
         }
 
         if (buf.isReadable()) {
-          throw handleOverflow(packet, buf.readerIndex(), buf.writerIndex());
+          throw handleOverflow(packet, buf.readerIndex(), buf.writerIndex(), getFullPacketDump(packet, buf));
         }
         ctx.fireChannelRead(packet);
       } finally {
@@ -97,17 +101,19 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
     int expectedMinLen = packet.expectedMinLength(buf, direction, registry.version);
     int expectedMaxLen = packet.expectedMaxLength(buf, direction, registry.version);
     if (expectedMaxLen != -1 && buf.readableBytes() > expectedMaxLen) {
-      throw handleOverflow(packet, expectedMaxLen, buf.readableBytes());
+      throw handleOverflow(packet, expectedMaxLen, buf.readableBytes(), null);
     }
     if (buf.readableBytes() < expectedMinLen) {
       throw handleUnderflow(packet, expectedMaxLen, buf.readableBytes());
     }
   }
 
-  private Exception handleOverflow(MinecraftPacket packet, int expected, int actual) {
+  private Exception handleOverflow(MinecraftPacket packet, int expected, int actual,
+                                   @Nullable String packetDump) {
     if (DEBUG) {
       return new CorruptedFrameException("Packet sent for " + packet.getClass() + " was too "
-          + "big (expected " + expected + " bytes, got " + actual + " bytes)");
+          + "big (expected " + expected + " bytes, got " + actual + " bytes)"
+              + (packetDump != null ? "\n" + packetDump : ""));
     } else {
       return DECODE_FAILED;
     }
@@ -122,10 +128,12 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
     }
   }
 
-  private Exception handleDecodeFailure(Exception cause, MinecraftPacket packet, int packetId) {
+  private Exception handleDecodeFailure(Exception cause, MinecraftPacket packet, int packetId,
+                                        @Nullable String packetDump) {
     if (DEBUG) {
       return new CorruptedFrameException(
-          "Error decoding " + packet.getClass() + " " + getExtraConnectionDetail(packetId), cause);
+          "Error decoding " + packet.getClass() + " " + getExtraConnectionDetail(packetId)
+              + (packetDump != null ? "\n" + packetDump : ""), cause);
     } else {
       return DECODE_FAILED;
     }
@@ -134,6 +142,14 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
   private String getExtraConnectionDetail(int packetId) {
     return "Direction " + direction + " Protocol " + registry.version + " State " + state
         + " ID " + Integer.toHexString(packetId);
+  }
+
+  private @Nullable String getFullPacketDump(MinecraftPacket packet, ByteBuf buffer) {
+    if (DUMP_PACKET_BUFFERS) {
+      return packet.toString() + "\n" + ByteBufUtil.prettyHexDump(buffer);
+    } else {
+      return null;
+    }
   }
 
   public void setProtocolVersion(ProtocolVersion protocolVersion) {
