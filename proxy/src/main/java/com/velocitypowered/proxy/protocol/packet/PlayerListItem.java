@@ -59,6 +59,14 @@ public class PlayerListItem implements MinecraftPacket {
   }
 
   @Override
+  public String toString() {
+    return "PlayerListItem{" +
+            "action=" + action +
+            ", items=" + items +
+            '}';
+  }
+
+  @Override
   public void decode(ByteBuf buf, ProtocolUtils.Direction direction, ProtocolVersion version) {
     if (version.compareTo(ProtocolVersion.MINECRAFT_1_8) >= 0) {
       action = ProtocolUtils.readVarInt(buf);
@@ -246,6 +254,18 @@ public class PlayerListItem implements MinecraftPacket {
     public Item setDisplayName(@Nullable Component displayName) {
       this.displayName = displayName;
       return this;
+    }
+
+    @Override
+    public String toString() {
+      return "Item{" +
+              "uuid=" + uuid +
+              ", name='" + name + '\'' +
+              ", properties=" + properties +
+              ", gameMode=" + gameMode +
+              ", latency=" + latency +
+              ", displayName=" + displayName +
+              '}';
     }
   }
 }

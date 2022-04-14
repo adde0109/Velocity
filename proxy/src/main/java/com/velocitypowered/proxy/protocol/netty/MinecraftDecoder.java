@@ -84,11 +84,13 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
         try {
           packet.decode(buf, direction, registry.version);
         } catch (Exception e) {
-          throw handleDecodeFailure(e, packet, packetId, getFullPacketDump(packet, buf));
+          throw handleDecodeFailure(e, packet, packetId,
+                  getFullPacketDump(packet, originalReaderIndex, buf));
         }
 
         if (buf.isReadable()) {
-          throw handleOverflow(packet, buf.readerIndex(), buf.writerIndex(), getFullPacketDump(packet, buf));
+          throw handleOverflow(packet, buf.readerIndex(), buf.writerIndex(),
+                  getFullPacketDump(packet, originalReaderIndex, buf));
         }
         ctx.fireChannelRead(packet);
       } finally {
@@ -144,9 +146,14 @@ public class MinecraftDecoder extends ChannelInboundHandlerAdapter {
         + " ID " + Integer.toHexString(packetId);
   }
 
-  private @Nullable String getFullPacketDump(MinecraftPacket packet, ByteBuf buffer) {
+  private @Nullable String getFullPacketDump(MinecraftPacket packet,
+                                             final int originalPacketIndex, ByteBuf buffer) {
     if (DUMP_PACKET_BUFFERS) {
-      return packet.toString() + "\n" + ByteBufUtil.prettyHexDump(buffer);
+      final int newReaderIndex = buffer.readerIndex();
+      buffer.readerIndex(originalPacketIndex);
+      String prepared = packet.toString() + "\n" + ByteBufUtil.prettyHexDump(buffer);
+      buffer.readerIndex(newReaderIndex);
+      return prepared;
     } else {
       return null;
     }
