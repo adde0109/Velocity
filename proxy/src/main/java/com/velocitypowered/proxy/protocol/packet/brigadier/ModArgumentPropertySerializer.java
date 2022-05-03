@@ -17,6 +17,7 @@
 
 package com.velocitypowered.proxy.protocol.packet.brigadier;
 
+import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -30,14 +31,14 @@ class ModArgumentPropertySerializer implements ArgumentPropertySerializer<ModArg
   }
 
   @Override
-  public @Nullable ModArgumentProperty deserialize(ByteBuf buf) {
-    String identifier = ProtocolUtils.readString(buf);
+  public @Nullable ModArgumentProperty deserialize(ByteBuf buf, ProtocolVersion version) {
+    ArgumentIdentifier identifier = ArgumentPropertyRegistry.readIdentifier(buf, version);
     byte[] extraData = ProtocolUtils.readByteArray(buf);
     return new ModArgumentProperty(identifier, Unpooled.wrappedBuffer(extraData));
   }
 
   @Override
-  public void serialize(ModArgumentProperty object, ByteBuf buf) {
+  public void serialize(ModArgumentProperty object, ByteBuf buf, ProtocolVersion version) {
     // This is special-cased by ArgumentPropertyRegistry
     throw new UnsupportedOperationException();
   }
