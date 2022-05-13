@@ -41,6 +41,8 @@ import com.velocitypowered.api.permission.Tristate;
 import com.velocitypowered.api.proxy.ConnectionRequestBuilder;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ServerConnection;
+import com.velocitypowered.api.proxy.crypto.IdentifiedKey;
+import com.velocitypowered.api.proxy.crypto.SignedMessage;
 import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
 import com.velocitypowered.api.proxy.player.PlayerSettings;
 import com.velocitypowered.api.proxy.player.ResourcePackInfo;
@@ -48,21 +50,24 @@ import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.util.GameProfile;
 import com.velocitypowered.api.util.ModInfo;
 import com.velocitypowered.proxy.VelocityServer;
+import com.velocitypowered.proxy.config.PlayerInfoForwarding;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftConnectionAssociation;
 import com.velocitypowered.proxy.connection.backend.VelocityServerConnection;
 import com.velocitypowered.proxy.connection.player.VelocityResourcePackInfo;
 import com.velocitypowered.proxy.connection.util.ConnectionMessages;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
+import com.velocitypowered.proxy.crypto.SignedChatMessage;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
-import com.velocitypowered.proxy.protocol.packet.Chat;
 import com.velocitypowered.proxy.protocol.packet.ClientSettings;
 import com.velocitypowered.proxy.protocol.packet.Disconnect;
 import com.velocitypowered.proxy.protocol.packet.HeaderAndFooter;
 import com.velocitypowered.proxy.protocol.packet.KeepAlive;
 import com.velocitypowered.proxy.protocol.packet.PluginMessage;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackRequest;
+import com.velocitypowered.proxy.protocol.packet.chat.Chat;
+import com.velocitypowered.proxy.protocol.packet.chat.PlayerChat;
 import com.velocitypowered.proxy.protocol.packet.title.GenericTitlePacket;
 import com.velocitypowered.proxy.server.VelocityRegisteredServer;
 import com.velocitypowered.proxy.tablist.VelocityTabList;
@@ -159,9 +164,10 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player {
           .build();
   private @Nullable String clientBrand;
   private @Nullable Locale effectiveLocale;
+  private final @Nullable IdentifiedKey key;
 
   ConnectedPlayer(VelocityServer server, GameProfile profile, MinecraftConnection connection,
-      @Nullable InetSocketAddress virtualHost, boolean onlineMode) {
+      @Nullable InetSocketAddress virtualHost, boolean onlineMode, IdentifiedKey key) {
     this.server = server;
     this.profile = profile;
     this.connection = connection;
@@ -170,6 +176,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player {
     this.connectionPhase = connection.getType().getInitialClientPhase();
     this.knownChannels = CappedSet.create(MAX_PLUGIN_CHANNELS);
     this.onlineMode = onlineMode;
+    this.key = key;
 
     if (connection.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_8) >= 0) {
       this.tabList = new VelocityTabList(this);
@@ -311,7 +318,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player {
   @Override
   public void sendMessage(@NonNull Identity identity, @NonNull Component message) {
     Component translated = translateMessage(message);
-    connection.write(Chat.createClientbound(identity, translated, this.getProtocolVersion()));
+    sendMessage(identity, message, MessageType.CHAT);
   }
 
   @Override
@@ -321,9 +328,9 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player {
     Preconditions.checkNotNull(type, "type");
 
     Component translated = translateMessage(message);
-    Chat packet = Chat.createClientbound(identity, translated, this.getProtocolVersion());
-    packet.setType(type == MessageType.CHAT ? Chat.CHAT_TYPE : Chat.SYSTEM_TYPE);
-    connection.write(packet);
+
+    connection.write(Chat.createUniversal(ProtocolUtils.Direction.CLIENTBOUND, this.getProtocolVersion(),
+            translated, type == MessageType.CHAT ? Chat.CHAT_TYPE : Chat.SYSTEM_TYPE, identity.uuid(), null, false));
   }
 
   @Override
@@ -344,10 +351,10 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player {
       JsonObject object = new JsonObject();
       object.addProperty("text", LegacyComponentSerializer.legacySection()
           .serialize(translated));
-      Chat chat = new Chat();
-      chat.setMessage(object.toString());
-      chat.setType(Chat.GAME_INFO_TYPE);
-      connection.write(chat);
+      Chat genericChat = new Chat();
+      genericChat.setMessage(object.toString());
+      genericChat.setType(Chat.GAME_INFO_TYPE);
+      connection.write(genericChat);
     }
   }
 
@@ -881,7 +888,16 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player {
     Preconditions.checkArgument(input.length() <= Chat.MAX_SERVERBOUND_MESSAGE_LENGTH,
         "input cannot be greater than " + Chat.MAX_SERVERBOUND_MESSAGE_LENGTH
             + " characters in length");
-    ensureBackendConnection().write(Chat.createServerbound(input));
+
+    MinecraftConnection conn = ensureBackendConnection();
+    boolean forceDowngrade = Preconditions.checkNotNull(this.connectedServer).isForceDowngrade();
+    Object message = input;
+    if (this.key != null && !forceDowngrade) {
+      message = SignedChatMessage.selfSigned(input, server.getChatSigningKeyPair(), this.getUniqueId());
+    }
+    conn.write(Chat.createUniversal(ProtocolUtils.Direction.SERVERBOUND,
+            this.getProtocolVersion(), input, Chat.CHAT_TYPE, this.getUniqueId(), null, false));
+
   }
 
   @Override
@@ -1048,6 +1064,11 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player {
    */
   public Collection<String> getKnownChannels() {
     return knownChannels;
+  }
+
+  @Override
+  public IdentifiedKey getIdentifiedKey() {
+    return key;
   }
 
   private class IdentityImpl implements Identity {

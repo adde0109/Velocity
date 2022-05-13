@@ -65,6 +65,7 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
   private BackendConnectionPhase connectionPhase = BackendConnectionPhases.UNKNOWN;
   private final Map<Long, Long> pendingPings = new HashMap<>();
   private @MonotonicNonNull DimensionRegistry activeDimensionRegistry;
+  private final boolean forceDowngrade;
 
   /**
    * Initializes a new server connection.
@@ -77,6 +78,7 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
     this.registeredServer = registeredServer;
     this.proxyPlayer = proxyPlayer;
     this.server = server;
+    this.forceDowngrade = server.getConfiguration().getPlayerInfoForwardingMode() == PlayerInfoForwarding.NONE;
   }
 
   /**
@@ -329,5 +331,9 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
 
   public void setActiveDimensionRegistry(DimensionRegistry activeDimensionRegistry) {
     this.activeDimensionRegistry = activeDimensionRegistry;
+  }
+
+  public boolean isForceDowngrade() {
+    return forceDowngrade;
   }
 }

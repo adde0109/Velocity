@@ -19,6 +19,7 @@ package com.velocitypowered.proxy.connection.client;
 
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.api.proxy.LoginPhaseConnection;
+import com.velocitypowered.api.proxy.crypto.IdentifiedKey;
 import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.protocol.packet.LoginPluginMessage;
@@ -45,6 +46,7 @@ public class LoginInboundConnection implements LoginPhaseConnection {
   private final Queue<LoginPluginMessage> loginMessagesToSend;
   private volatile Runnable onAllMessagesHandled;
   private volatile boolean loginEventFired;
+  private IdentifiedKey key;
 
   LoginInboundConnection(
       InitialInboundConnection delegate) {
@@ -148,5 +150,15 @@ public class LoginInboundConnection implements LoginPhaseConnection {
 
   MinecraftConnection delegatedConnection() {
     return delegate.getConnection();
+  }
+
+
+  @Override
+  public IdentifiedKey getIdentifiedKey() {
+    return key;
+  }
+
+  public void setKey(IdentifiedKey key) {
+    this.key = key;
   }
 }

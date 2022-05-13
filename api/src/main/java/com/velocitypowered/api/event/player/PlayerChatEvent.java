@@ -11,6 +11,7 @@ import com.google.common.base.Preconditions;
 import com.velocitypowered.api.event.ResultedEvent;
 import com.velocitypowered.api.event.annotation.AwaitingEvent;
 import com.velocitypowered.api.proxy.Player;
+import com.velocitypowered.api.proxy.crypto.SignedMessage;
 import java.util.Optional;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -25,6 +26,7 @@ public final class PlayerChatEvent implements ResultedEvent<PlayerChatEvent.Chat
   private final Player player;
   private final String message;
   private ChatResult result;
+  private final @Nullable SignedMessage signedMessage;
 
   /**
    * Constructs a PlayerChatEvent.
@@ -35,6 +37,19 @@ public final class PlayerChatEvent implements ResultedEvent<PlayerChatEvent.Chat
     this.player = Preconditions.checkNotNull(player, "player");
     this.message = Preconditions.checkNotNull(message, "message");
     this.result = ChatResult.allowed();
+    this.signedMessage = null;
+  }
+
+  /**
+   * Constructs a PlayerChatEvent.
+   * @param player the player sending the message
+   * @param message the signed message being sent
+   */
+  public PlayerChatEvent(Player player, SignedMessage message) {
+    this.player = Preconditions.checkNotNull(player, "player");
+    this.signedMessage = Preconditions.checkNotNull(message, "message");
+    this.message = message.getMessage();
+    this.result = ChatResult.allowed();
   }
 
   public Player getPlayer() {
@@ -43,6 +58,10 @@ public final class PlayerChatEvent implements ResultedEvent<PlayerChatEvent.Chat
 
   public String getMessage() {
     return message;
+  }
+
+  public @Nullable SignedMessage getSignedMessage() {
+    return signedMessage;
   }
 
   @Override
@@ -60,6 +79,7 @@ public final class PlayerChatEvent implements ResultedEvent<PlayerChatEvent.Chat
     return "PlayerChatEvent{"
         + "player=" + player
         + ", message=" + message
+        + ", signedMessage'" + signedMessage + '\''
         + ", result=" + result
         + '}';
   }
@@ -112,6 +132,9 @@ public final class PlayerChatEvent implements ResultedEvent<PlayerChatEvent.Chat
 
     /**
      * Allows the message to be sent, but silently replaced with another.
+     * <p>If the message was a signed message then the signature
+     * will be replaced by the proxy signature. Keep in mind that this will make the
+     * message appear to be sent by the system rather than the player when relayed.</p>
      * @param message the message to use instead
      * @return a result with a new message
      */

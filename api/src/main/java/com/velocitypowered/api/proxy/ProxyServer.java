@@ -19,11 +19,11 @@ import com.velocitypowered.api.proxy.server.ServerInfo;
 import com.velocitypowered.api.scheduler.Scheduler;
 import com.velocitypowered.api.util.ProxyVersion;
 import java.net.InetSocketAddress;
+import java.security.PublicKey;
 import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 import net.kyori.adventure.audience.Audience;
-import org.checkerframework.checker.nullness.qual.NonNull;
 
 /**
  * Provides an interface to a Minecraft server proxy.
@@ -217,4 +217,18 @@ public interface ProxyServer extends Audience {
    * @return a ResourcePackInfo builder
    */
   ResourcePackInfo.Builder createResourcePackBuilder(String url);
+
+  /**
+   * Returns the volatile self-signed chat-signing public key of the proxy.
+   *
+   * @return the proxy message public key
+   */
+  PublicKey getChatSigningPublicKey();
+
+  /**
+   * Returns the volatile UUID for self-signing on the proxy.
+   *
+   * @return the volatile UUID
+   */
+  UUID getSigningUuidIdentify();
 }

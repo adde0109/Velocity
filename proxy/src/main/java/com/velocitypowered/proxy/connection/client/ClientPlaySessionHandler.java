@@ -22,7 +22,9 @@ import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_16;
 import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_8;
 import static com.velocitypowered.proxy.protocol.util.PluginMessageUtil.constructChannelsPacket;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.primitives.Longs;
 import com.mojang.brigadier.suggestion.Suggestion;
 import com.velocitypowered.api.command.VelocityBrigadierMessage;
 import com.velocitypowered.api.event.command.CommandExecuteEvent.CommandResult;
@@ -32,6 +34,7 @@ import com.velocitypowered.api.event.player.PlayerChatEvent;
 import com.velocitypowered.api.event.player.PlayerClientBrandEvent;
 import com.velocitypowered.api.event.player.TabCompleteEvent;
 import com.velocitypowered.api.network.ProtocolVersion;
+import com.velocitypowered.api.proxy.crypto.SignedMessage;
 import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
 import com.velocitypowered.api.proxy.messages.LegacyChannelIdentifier;
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
@@ -42,10 +45,11 @@ import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.connection.backend.BackendConnectionPhases;
 import com.velocitypowered.proxy.connection.backend.BungeeCordMessageResponder;
 import com.velocitypowered.proxy.connection.backend.VelocityServerConnection;
+import com.velocitypowered.proxy.crypto.SignedChatMessage;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
+import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.packet.BossBar;
-import com.velocitypowered.proxy.protocol.packet.Chat;
 import com.velocitypowered.proxy.protocol.packet.ClientSettings;
 import com.velocitypowered.proxy.protocol.packet.JoinGame;
 import com.velocitypowered.proxy.protocol.packet.KeepAlive;
@@ -55,6 +59,8 @@ import com.velocitypowered.proxy.protocol.packet.Respawn;
 import com.velocitypowered.proxy.protocol.packet.TabCompleteRequest;
 import com.velocitypowered.proxy.protocol.packet.TabCompleteResponse;
 import com.velocitypowered.proxy.protocol.packet.TabCompleteResponse.Offer;
+import com.velocitypowered.proxy.protocol.packet.chat.Chat;
+import com.velocitypowered.proxy.protocol.packet.chat.PlayerChat;
 import com.velocitypowered.proxy.protocol.packet.title.GenericTitlePacket;
 import com.velocitypowered.proxy.protocol.util.PluginMessageUtil;
 import com.velocitypowered.proxy.util.CharacterUtil;
@@ -142,6 +148,11 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   }
 
   @Override
+  public boolean handle(PlayerChat packet) {
+    return handle((Chat) packet);
+  }
+
+  @Override
   public boolean handle(Chat packet) {
     VelocityServerConnection serverConnection = player.getConnectedServer();
     if (serverConnection == null) {
@@ -159,11 +170,25 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       return true;
     }
 
+    final boolean forceDowngrade = serverConnection.isForceDowngrade();
+
+    SignedChatMessage signedMsg = null;
+    if (player.getIdentifiedKey() != null && packet instanceof PlayerChat) {
+      PlayerChat pcp = (PlayerChat) packet;
+      // Note to maintainer: The client sometimes stupidly uses an invalid UUID here...
+      signedMsg = new SignedChatMessage(pcp.getMessage(),
+              player.getIdentifiedKey().getSignedPublicKey(), player.getUniqueId(), pcp.getTimestamp(),
+              pcp.getSignature(), Longs.toByteArray(pcp.getSalt()));
+      // TODO: Fix this, verify isn't working yet
+      //Preconditions.checkArgument(signedMsg.isSignatureValid(), "Chat message signature invalid!");
+    }
+
     if (msg.startsWith("/")) {
       String originalCommand = msg.substring(1);
+      SignedChatMessage finalSignedMsg = signedMsg;
       server.getCommandManager().callCommandEvent(player, msg.substring(1))
-          .thenComposeAsync(event -> processCommandExecuteResult(originalCommand,
-              event.getResult()))
+          .thenComposeAsync(event -> processCommandExecuteResult(originalCommand, finalSignedMsg,
+              forceDowngrade, event.getResult()))
           .whenComplete((ignored, throwable) -> {
             if (server.getConfiguration().isLogCommandExecutions()) {
               logger.info("{} -> executed command /{}", player, originalCommand);
@@ -177,14 +202,28 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
             return null;
           });
     } else {
-      PlayerChatEvent event = new PlayerChatEvent(player, msg);
+      PlayerChatEvent event;
+      if (signedMsg != null) {
+        event = new PlayerChatEvent(player, signedMsg);
+      } else {
+        event = new PlayerChatEvent(player, msg);
+      }
+
       server.getEventManager().fire(event)
           .thenAcceptAsync(pme -> {
             PlayerChatEvent.ChatResult chatResult = pme.getResult();
             if (chatResult.isAllowed()) {
               Optional<String> eventMsg = pme.getResult().getMessage();
               if (eventMsg.isPresent()) {
-                smc.write(Chat.createServerbound(eventMsg.get()));
+                Object message = eventMsg.get();
+                if (event.getSignedMessage() != null && !forceDowngrade) {
+                  message = SignedChatMessage.selfSigned(eventMsg.get(),
+                          server.getChatSigningKeyPair(), server.getSigningUuidIdentify());
+                }
+                smc.write(Chat.createUniversal(ProtocolUtils.Direction.SERVERBOUND,
+                        this.player.getProtocolVersion(), message, Chat.CHAT_TYPE, this.player.getUniqueId(),
+                        null, forceDowngrade));
+
               } else {
                 smc.write(packet);
               }
@@ -620,7 +659,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   }
 
   private CompletableFuture<Void> processCommandExecuteResult(String originalCommand,
-      CommandResult result) {
+                                                              @Nullable SignedMessage signedMessage,
+                                                              boolean forceDowngrade, CommandResult result) {
     if (result == CommandResult.denied()) {
       return CompletableFuture.completedFuture(null);
     }
@@ -628,16 +668,39 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
     MinecraftConnection smc = player.ensureAndGetCurrentServer().ensureConnected();
     String commandToRun = result.getCommand().orElse(originalCommand);
     if (result.isForwardToServer()) {
-      return CompletableFuture.runAsync(() -> smc.write(Chat.createServerbound("/"
-          + commandToRun)), smc.eventLoop());
+      return CompletableFuture.runAsync(() -> smc.write(
+              createFinalCommandMessage(commandToRun, forceDowngrade, signedMessage)), smc.eventLoop());
     } else {
       return server.getCommandManager().executeImmediatelyAsync(player, commandToRun)
           .thenAcceptAsync(hasRun -> {
             if (!hasRun) {
-              smc.write(Chat.createServerbound("/" + commandToRun));
+              smc.write(createFinalCommandMessage(commandToRun, forceDowngrade, signedMessage));
             }
           }, smc.eventLoop());
     }
+  }
+
+  private Chat createFinalCommandMessage(String commandToRun, boolean forceDowngrade,
+                                         @Nullable SignedMessage originalSignedMessage) {
+    Object messageToSend;
+    if (originalSignedMessage != null) {
+      if (!forceDowngrade) {
+        if (!originalSignedMessage.getMessage().substring(1).equals(commandToRun)) {
+          messageToSend = SignedChatMessage.selfSigned("/" + commandToRun,
+                  this.server.getServerKeyPair(), this.player.getUniqueId());
+        } else {
+          messageToSend = originalSignedMessage;
+        }
+      } else {
+        messageToSend = "/" + commandToRun;
+      }
+    } else {
+      messageToSend = "/" + commandToRun;
+    }
+
+    return Chat.createUniversal(ProtocolUtils.Direction.SERVERBOUND,
+            this.player.getProtocolVersion(), messageToSend, Chat.CHAT_TYPE,
+            this.player.getUniqueId(), null, forceDowngrade);
   }
 
   /**
