@@ -68,7 +68,8 @@ public class InitialLoginSessionHandler implements MinecraftSessionHandler {
   private @MonotonicNonNull ServerLogin login;
   private byte[] verify = EMPTY_BYTE_ARRAY;
   private LoginState currentState = LoginState.LOGIN_PACKET_EXPECTED;
-  private boolean forceKeyAuthentication;
+  private final boolean forceKeyAuthentication;
+  private final boolean forceAuthenticationDowngrade;
 
   InitialLoginSessionHandler(VelocityServer server, MinecraftConnection mcConnection,
                              LoginInboundConnection inbound) {
@@ -76,6 +77,7 @@ public class InitialLoginSessionHandler implements MinecraftSessionHandler {
     this.mcConnection = Preconditions.checkNotNull(mcConnection, "mcConnection");
     this.inbound = Preconditions.checkNotNull(inbound, "inbound");
     this.forceKeyAuthentication = Boolean.getBoolean("auth.forceSecureProfiles");
+    this.forceAuthenticationDowngrade = Boolean.getBoolean("auth.forceInsecureDowngrade");
   }
 
   @Override
@@ -168,7 +170,7 @@ public class InitialLoginSessionHandler implements MinecraftSessionHandler {
 
     try {
       KeyPair serverKeyPair = server.getServerKeyPair();
-      if (inbound.getIdentifiedKey() != null) {
+      if (inbound.getIdentifiedKey() != null && !forceAuthenticationDowngrade) {
         IdentifiedKey playerKey = inbound.getIdentifiedKey();
         if (!playerKey.verifyDataSignature(packet.getVerifyToken(), verify, Longs.toByteArray(packet.getSalt()))) {
           throw new IllegalStateException("Invalid client public signature.");
