@@ -101,9 +101,15 @@ public class ServerLogin implements MinecraftPacket {
     // Accommodate the rare (but likely malicious) use of UTF-8 usernames, since it is technically
     // legal on the protocol level.
     int base = 1 + (16 * 4);
+    // Adjustments for Key-authentication
     if (version.compareTo(ProtocolVersion.MINECRAFT_1_19) >= 0) {
-      return -1;
-      //TODO: ## 19
+      // + 1 for the boolean present/ not present
+      // + 8 for the long expiry
+      // + 2 len for varint key size
+      // + 294 for the key
+      // + 2 len for varint signature size
+      // + 512 for signature
+      return base + 1 + 8 + 2 + 294 + 2 + 512;
     }
     return base;
   }

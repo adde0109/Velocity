@@ -31,9 +31,11 @@ public class IdentifiedKeyImpl implements IdentifiedKey {
   private final Instant expiryTemporal;
   private @MonotonicNonNull Boolean isSignatureValid;
 
+  public static final int MAX_KEY_LEN = 294;
+
   public IdentifiedKeyImpl(byte[] keyBits, long expiry,
                             byte[] signature) {
-    this(EncryptionUtils.parseRsaPublicKey(keyBits), Instant.ofEpochMilli(expiry), signature);
+    this(EncryptionUtils.parseRsaPublicKey(keyBits, MAX_KEY_LEN), Instant.ofEpochMilli(expiry), signature);
   }
 
   /**

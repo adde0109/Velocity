@@ -19,7 +19,9 @@ package com.velocitypowered.proxy.crypto;
 
 import com.google.common.base.Preconditions;
 import com.google.common.io.ByteStreams;
+import com.velocitypowered.proxy.protocol.netty.MinecraftDecoder;
 import com.velocitypowered.proxy.util.except.QuietDecoderException;
+import io.netty.handler.codec.CorruptedFrameException;
 import it.unimi.dsi.fastutil.Pair;
 
 import java.io.IOException;
@@ -57,6 +59,9 @@ public enum EncryptionUtils {
           = new QuietDecoderException("Incorrectly signed chat message");
   public static final QuietDecoderException PREVIEW_SIGNATURE_MISSING
           = new QuietDecoderException("Unsigned chat message requested signed preview");
+
+  private static final QuietDecoderException INVALID_ASN1_PAYLOAD
+          = new QuietDecoderException("Invalid key payload");
   public static final byte[] EMPTY = new byte[0];
   private static PublicKey YGGDRASIL_SESSION_KEY;
   private static KeyFactory RSA_KEY_FACTORY;
@@ -74,7 +79,7 @@ public enum EncryptionUtils {
     try {
       byte[] bytes = ByteStreams.toByteArray(
               EncryptionUtils.class.getClassLoader().getResourceAsStream("yggdrasil_session_pubkey.der"));
-      YGGDRASIL_SESSION_KEY =  parseRsaPublicKey(bytes);
+      YGGDRASIL_SESSION_KEY =  parseRsaPublicKey(bytes, 550);
     } catch (IOException | NullPointerException err) {
       throw new RuntimeException(err);
     }
@@ -195,11 +200,64 @@ public enum EncryptionUtils {
    * @param keyValue the key bytes
    * @return the generated key
    */
-  public static PublicKey parseRsaPublicKey(byte[] keyValue) {
+  public static PublicKey parseRsaPublicKey(byte[] keyValue, int maxLen) {
+    validateAsn1PayloadLength(keyValue, maxLen);
     try {
       return RSA_KEY_FACTORY.generatePublic(new X509EncodedKeySpec(keyValue));
     } catch (InvalidKeySpecException e) {
       throw new IllegalArgumentException("Invalid key bytes");
+    }
+  }
+
+  private static int unsignByte(byte b) {
+    return b & 0xff;
+  }
+
+  private static int byteChunked(int num) {
+    int r = 0;
+    while (num != 0) {
+      num >>= 8;
+      r++;
+    }
+    return r;
+  }
+
+  private static void validateAsn1PayloadLength(byte[] data, int maxLen) {
+    if (data.length < 2) {
+      throw MinecraftDecoder.DEBUG ? new CorruptedFrameException("ASN1 payload missing") : INVALID_ASN1_PAYLOAD;
+    }
+    int keyTag = data[0];
+    if (keyTag != 0x30) {
+      throw MinecraftDecoder.DEBUG ? new CorruptedFrameException("Not an ASN1 payload") : INVALID_ASN1_PAYLOAD;
+    }
+
+    int sizeIndicator = unsignByte(data[1]);
+
+    if (sizeIndicator == 0x80) {
+      throw MinecraftDecoder.DEBUG ? new CorruptedFrameException("ASN1 size limit was infinite") : INVALID_ASN1_PAYLOAD;
+    }
+
+    // If set, the highest bit is indicator for multipart
+    if ((sizeIndicator & 0x080) != 0x00) {
+      if (data.length < 3) {
+        throw MinecraftDecoder.DEBUG ? new CorruptedFrameException("ASN1 payload too small") : INVALID_ASN1_PAYLOAD;
+      }
+
+      // Bytes below 0x80 make up the byte counter
+      int byteCounter = (sizeIndicator & 0x07f);
+
+      if (byteCounter >= 4 || byteCounter > byteChunked(maxLen)) {
+        throw MinecraftDecoder.DEBUG ? new CorruptedFrameException("ASN1 payload bits too big") : INVALID_ASN1_PAYLOAD;
+      }
+
+      int msb = unsignByte(data[2]);
+      if (msb == 0 || (msb << (8 * (byteCounter - 1))) > maxLen) {
+        throw MinecraftDecoder.DEBUG ? new CorruptedFrameException("Invalid ASN1 msb size") : INVALID_ASN1_PAYLOAD;
+      }
+    } else {
+      if ((sizeIndicator + 2) > maxLen) {
+        throw MinecraftDecoder.DEBUG ? new CorruptedFrameException("ASN1 payload too large") : INVALID_ASN1_PAYLOAD;
+      }
     }
   }
 

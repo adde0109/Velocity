@@ -559,8 +559,8 @@ public enum ProtocolUtils {
    */
   public static IdentifiedKey readPlayerKey(ByteBuf buf) {
     long expiry = buf.readLong();
-    byte[] key = ProtocolUtils.readByteArray(buf);
-    byte[] signature = ProtocolUtils.readByteArray(buf, 4096);
+    byte[] key = ProtocolUtils.readByteArray(buf, IdentifiedKeyImpl.MAX_KEY_LEN);
+    byte[] signature = ProtocolUtils.readByteArray(buf, 512);
     return new IdentifiedKeyImpl(key, expiry, signature);
   }
 
