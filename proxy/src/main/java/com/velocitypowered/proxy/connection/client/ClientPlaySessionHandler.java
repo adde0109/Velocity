@@ -32,6 +32,7 @@ import com.velocitypowered.api.event.player.PlayerChatEvent;
 import com.velocitypowered.api.event.player.PlayerClientBrandEvent;
 import com.velocitypowered.api.event.player.TabCompleteEvent;
 import com.velocitypowered.api.network.ProtocolVersion;
+import com.velocitypowered.api.proxy.ServerConnection;
 import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
 import com.velocitypowered.api.proxy.messages.LegacyChannelIdentifier;
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
@@ -703,7 +704,13 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       return CompletableFuture.completedFuture(null);
     }
 
-    MinecraftConnection smc = player.ensureAndGetCurrentServer().ensureConnected();
+    MinecraftConnection smc = player.getCurrentServer().map(
+            serverConnection -> ((VelocityServerConnection) serverConnection).getConnection()).orElse(null);
+    if (smc == null) {
+      player.disconnect(Component.translatable("velocity.command.generic-error", NamedTextColor.RED));
+      return CompletableFuture.completedFuture(null);
+    }
+
     String commandToRun = result.getCommand().orElse(originalCommand);
     if (result.isForwardToServer()) {
       ChatBuilder write = ChatBuilder
