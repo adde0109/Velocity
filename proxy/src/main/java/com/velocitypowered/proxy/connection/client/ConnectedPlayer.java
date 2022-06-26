@@ -586,6 +586,9 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
     if (connectedServer != null && connectedServer.getServerInfo().equals(server.getServerInfo())) {
       friendlyError = Component.translatable("velocity.error.connected-server-error",
           Component.text(server.getServerInfo().getName()));
+      logger.error("{}: encountered exception during connection {} to server {} ", this, throwable.getMessage(),
+              server.getServerInfo().getName());
+      throwable.printStackTrace();
     } else {
       logger.error("{}: unable to connect to server {}", this, server.getServerInfo().getName(),
           wrapped);
