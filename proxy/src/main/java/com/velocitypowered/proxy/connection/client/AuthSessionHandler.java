@@ -20,6 +20,7 @@ package com.velocitypowered.proxy.connection.client;
 import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_8;
 
 import com.google.common.base.Preconditions;
+import com.velocitypowered.api.chat.SecurityProfile;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.LoginEvent;
 import com.velocitypowered.api.event.connection.PostLoginEvent;
@@ -37,6 +38,7 @@ import com.velocitypowered.proxy.config.VelocityConfiguration;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.crypto.IdentifiedKeyImpl;
+import com.velocitypowered.proxy.crypto.VelocitySecurityProfile;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.packet.ServerLoginSuccess;
 import com.velocitypowered.proxy.protocol.packet.SetCompression;
@@ -76,8 +78,18 @@ public class AuthSessionHandler implements MinecraftSessionHandler {
     // Some connection types may need to alter the game profile.
     profile = mcConnection.getType().addGameProfileTokensIfRequired(profile,
         server.getConfiguration().getPlayerInfoForwardingMode());
+
+    IdentifiedKey playerKey = inbound.getIdentifiedKey();
+    SecurityProfile securityProfile;
+    if (playerKey == null) {
+      securityProfile = new VelocitySecurityProfile(SecurityProfile.Mode.DISABLED);
+    } else {
+      securityProfile = new VelocitySecurityProfile(SecurityProfile.Mode.ENFORCING,
+              SecurityProfile.Mode.ALLOW_DOWNGRADE, SecurityProfile.Mode.DISABLED);
+    }
+
     GameProfileRequestEvent profileRequestEvent = new GameProfileRequestEvent(inbound, profile,
-        onlineMode);
+        onlineMode, securityProfile);
     final GameProfile finalProfile = profile;
 
     server.getEventManager().fire(profileRequestEvent).thenComposeAsync(profileEvent -> {
@@ -88,7 +100,7 @@ public class AuthSessionHandler implements MinecraftSessionHandler {
 
       // Initiate a regular connection and move over to it.
       ConnectedPlayer player = new ConnectedPlayer(server, profileEvent.getGameProfile(),
-          mcConnection, inbound.getVirtualHost().orElse(null), onlineMode, inbound.getIdentifiedKey());
+          mcConnection, inbound.getVirtualHost().orElse(null), onlineMode, playerKey, securityProfile);
       this.connectedPlayer = player;
       if (!server.canRegisterConnection(player)) {
         player.disconnect0(Component.translatable("velocity.error.already-connected-proxy",

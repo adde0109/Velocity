@@ -10,6 +10,7 @@ package com.velocitypowered.api.event.player;
 import com.google.common.base.Preconditions;
 import com.velocitypowered.api.event.annotation.AwaitingEvent;
 import com.velocitypowered.api.proxy.InboundConnection;
+import com.velocitypowered.api.chat.SecurityProfile;
 import com.velocitypowered.api.util.GameProfile;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -32,19 +33,37 @@ public final class GameProfileRequestEvent {
   private final GameProfile originalProfile;
   private final boolean onlineMode;
   private @Nullable GameProfile gameProfile;
+  private final @Nullable SecurityProfile chatSecurityProfile;
+  private SecurityProfile.@Nullable Mode forcedChatSecurityMode;
 
   /**
    * Creates a new instance.
    * @param connection the connection connecting to the proxy
    * @param originalProfile the original {@link GameProfile} for the user
    * @param onlineMode whether or not the user connected in online or offline mode
+   * @param chatSecurityProfile security profile of the player for 1.19+
    */
   public GameProfileRequestEvent(InboundConnection connection, GameProfile originalProfile,
-      boolean onlineMode) {
+      boolean onlineMode, @Nullable SecurityProfile chatSecurityProfile) {
     this.connection = Preconditions.checkNotNull(connection, "connection");
     this.originalProfile = Preconditions.checkNotNull(originalProfile, "originalProfile");
     this.username = originalProfile.getName();
     this.onlineMode = onlineMode;
+    this.chatSecurityProfile = chatSecurityProfile;
+  }
+
+  /**
+   * @Deprecated
+   * Creates a new instance.
+   * @param connection the connection connecting to the proxy
+   * @param originalProfile the original {@link GameProfile} for the user
+   * @param onlineMode whether or not the user connected in online or offline mode
+   */
+  @Deprecated
+  public GameProfileRequestEvent(InboundConnection connection, GameProfile originalProfile,
+                                 boolean onlineMode) {
+    this(connection, originalProfile, onlineMode, null);
+
   }
 
   public InboundConnection getConnection() {
@@ -81,6 +100,18 @@ public final class GameProfileRequestEvent {
    */
   public void setGameProfile(@Nullable GameProfile gameProfile) {
     this.gameProfile = gameProfile;
+  }
+
+  public SecurityProfile getChatSecurityProfile() {
+    return chatSecurityProfile;
+  }
+
+  public SecurityProfile.Mode getForcedChatSecurityMode() {
+    return forcedChatSecurityMode;
+  }
+
+  public void setForcedChatSecurityMode(SecurityProfile.Mode forcedChatSecurityMode) {
+    this.forcedChatSecurityMode = forcedChatSecurityMode;
   }
 
   @Override

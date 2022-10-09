@@ -17,8 +17,8 @@
 
 package com.velocitypowered.proxy.crypto;
 
-import com.velocitypowered.api.proxy.crypto.SignedMessage;
-import java.util.Arrays;
+import com.velocitypowered.api.proxy.crypto.IdentifiedKey;
+
 import java.util.Base64;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -27,14 +27,13 @@ public class HeaderData {
   private final SignaturePair header;
   private final byte[] signature;
   private final byte[] dataHash;
-  //private final IdentifiedKey signer;
-  private final @Nullable SignedMessage message;
+  private final IdentifiedKey signer;
 
-  public HeaderData(SignaturePair header, byte[] signature, byte[] dataHash) {
+  public HeaderData(SignaturePair header, byte[] signature, byte[] dataHash, IdentifiedKey signer) {
     this.header = header;
     this.signature = signature;
     this.dataHash = dataHash;
-    this.message = null;
+    this.signer = signer;
   }
 
   public byte[] getDataHash() {
@@ -49,13 +48,17 @@ public class HeaderData {
     return signature;
   }
 
+  public IdentifiedKey getSigner() {
+    return signer;
+  }
+
   @Override
   public String toString() {
     return "HeaderData{"
             + "header=" + header
             + ", signature=" + new String(Base64.getEncoder().encode(signature))
             + ", dataHash=" + new String(Base64.getEncoder().encode(dataHash))
-            + ", message=" + message
+            + ", signer='" + signer + "'"
             + '}';
   }
 }

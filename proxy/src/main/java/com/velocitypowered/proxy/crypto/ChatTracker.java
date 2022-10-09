@@ -18,26 +18,34 @@
 package com.velocitypowered.proxy.crypto;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSet;
+import com.velocitypowered.api.chat.SecurityProfile;
 import com.velocitypowered.api.proxy.crypto.IdentifiedKey;
 import net.kyori.adventure.text.Component;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 public interface ChatTracker {
 
-  default void pushHeader(HeaderData headerData) {}
+  default VelocitySecurityProfile.Verdict pushServerMessage(HeaderData headerData) {
+    return null;
+  }
 
-  default @Nullable Component pushPlayerMessage(SignedChatMessage message) {
+  default VelocitySecurityProfile.Verdict pushPlayerMessage(SignedChatMessage message) {
+    return null;
+  }
+
+  default @Nullable Component updateAudience(Collection<IdentifiedKey> audience) {
+    return null;
+  }
+
+  default void updateServerInfo(VelocitySecurityProfile newServer) {}
+
+  default @Nullable IdentifiedKey getIdentifiedKey() {
     return null;
   }
 
@@ -46,38 +54,49 @@ public interface ChatTracker {
   static final Component UNSIGNED_CHAT = Component.translatable("multiplayer.disconnect.unsigned_chat");
   static final Component VALIDATION_FAILED = Component.translatable("multiplayer.disconnect.chat_validation_failed");
 
-  public static ChatTracker forKey(@Nullable IdentifiedKey key) {
+  public static ChatTracker forKey(@Nullable IdentifiedKey key, SecurityProfile playerSecurityInfo) {
     if (key == null) {
       return DUMMY_TRACKER;
     }
     switch (key.getKeyRevision()) {
       case LINKED_V2:
-        return new ChainedChatTracker(key);
+        return new ChainedChatTracker(key, playerSecurityInfo);
       case GENERIC_V1:
-        return new SequenceChatTracker();
+        return new SequenceChatTracker(key, playerSecurityInfo);
       default:
         throw new IllegalArgumentException("Unknown key revision");
     }
   }
 
   public static class SequenceChatTracker implements ChatTracker {
+    private final AtomicReference<Instant> lastTimestamp = new AtomicReference<>(Instant.EPOCH);
+    private final static VelocitySecurityProfile.Verdict OUT_OF_ORDER
+            = new VelocitySecurityProfile.Verdict(OUT_OF_ORDER_CHAT, VelocitySecurityProfile.Action.CONFLICT, true);
+    private final IdentifiedKey key;
+    private final SecurityProfile playerSecurityInfo;
 
-    private AtomicReference<Instant> lastTimestamp = new AtomicReference<>(Instant.EPOCH);
-
-    private SequenceChatTracker() {}
+    private SequenceChatTracker(IdentifiedKey key, SecurityProfile playerSecurityInfo) {
+      this.key = key;
+      this.playerSecurityInfo = playerSecurityInfo;
+    }
 
     @Override
-    public @Nullable Component pushPlayerMessage(SignedChatMessage message) {
+    public VelocitySecurityProfile.Verdict pushPlayerMessage(SignedChatMessage message) {
       Preconditions.checkNotNull(message);
       final Instant nextTimestamp = message.getExpiryTemporal();
       Instant previous;
       do {
         previous = lastTimestamp.get();
         if (previous.isBefore(nextTimestamp)) {
-          return OUT_OF_ORDER_CHAT;
+          return OUT_OF_ORDER;
         }
       } while (lastTimestamp.compareAndSet(previous, nextTimestamp));
       return null;
+    }
+
+    @Override
+    public @Nullable IdentifiedKey getIdentifiedKey() {
+      return key;
     }
   }
 
@@ -86,13 +105,17 @@ public interface ChatTracker {
     private List<HeaderData> passingData = new ArrayList<>();
     private SignedChatMessage lastMessage;
     private final Object internalLock = new Object();
+    private Set<IdentifiedKey> audience;
     private final IdentifiedKey key;
+    private final SecurityProfile playerSecurityInfo;
 
-    private ChainedChatTracker(IdentifiedKey key) {
+    private ChainedChatTracker(IdentifiedKey key, SecurityProfile playerSecurityInfo) {
       this.key = key;
+      this.audience = ImmutableSet.of(key);
+      this.playerSecurityInfo = playerSecurityInfo;
     }
 
-    public @Nullable Component pushPlayerMessage(SignedChatMessage message) {
+    public VelocitySecurityProfile.Verdict pushPlayerMessage(SignedChatMessage message) {
       Preconditions.checkNotNull(message);
       // message lastseen timestamp
       synchronized (internalLock) {
@@ -155,6 +178,16 @@ public interface ChatTracker {
       return null;
     }
 
+    @Override
+    public @Nullable Component updateAudience(Collection<IdentifiedKey> audience) {
+      return ChatTracker.super.updateAudience(audience);
+    }
+
+    @Override
+    public @Nullable IdentifiedKey getIdentifiedKey() {
+      return key;
+    }
+
     private static List<SignaturePair> getPairData(List<HeaderData> data){
       List<SignaturePair> ret = new ArrayList<>();
       for (HeaderData d : data) {
@@ -179,6 +212,11 @@ public interface ChatTracker {
       synchronized (internalLock) {
         passingData.add(toPush);
       }
+    }
+
+    @Override
+    public VelocitySecurityProfile.Mode getPlayerSupported() {
+      return VelocitySecurityProfile.Mode.ALLOW_DOWNGRADE;
     }
   }
 

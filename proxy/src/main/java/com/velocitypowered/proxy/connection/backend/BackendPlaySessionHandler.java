@@ -39,6 +39,7 @@ import com.velocitypowered.proxy.connection.client.ClientPlaySessionHandler;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.player.VelocityResourcePackInfo;
 import com.velocitypowered.proxy.connection.util.ConnectionMessages;
+import com.velocitypowered.proxy.crypto.VelocitySecurityProfile;
 import com.velocitypowered.proxy.crypto.HeaderData;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.packet.AvailableCommands;
@@ -59,6 +60,8 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.handler.timeout.ReadTimeoutException;
 import java.util.regex.Pattern;
+
+import net.kyori.adventure.text.Component;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -274,18 +277,39 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(ServerPlayerChat packet) {
-    HeaderData chatHeader = packet.getHeaderData();
-    if (chatHeader != null) {
-      ConnectedPlayer who = this.serverConn.getPlayer();
-      who.pushHeader(chatHeader);
+    VelocityServerConnection which = this.serverConn;
+    ConnectedPlayer who = which.getPlayer();
+
+    if (who.getSignedChatTracker().getPlayerSupported().supportsSigning()) {
+      // May be null
+      HeaderData chatHeader = packet.getHeaderData(who.getIdentifiedKey());
+
+      VelocitySecurityProfile mode = which.getSecurityInfo();
+
+      if (mode.getSupportedRevisions().contains())
+
+
+    } else {
+      packet.removeSecurityInfo();
     }
+
+
+
+    Component result = who.getSignedChatTracker().pushServerMessage(packet.getHeaderData());
+    if (result != null) {
+      which.disconnect();
+      who.handleConnectionException(which.getServer(), Disconnect.create(result, who.getProtocolVersion()), true);
+      return true;
+    }
+
     return false;
   }
 
   @Override
   public boolean handle(ServerData packet) {
     ConnectedPlayer who = this.serverConn.getPlayer();
-    who.setCurrentServerData(packet);
+
+
     server.getServerListPingHandler().getInitialPing(who)
         .thenComposeAsync(
             ping -> server.getEventManager().fire(new ProxyPingEvent(this.serverConn.getPlayer(), ping)),

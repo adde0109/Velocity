@@ -20,12 +20,12 @@ package com.velocitypowered.proxy.protocol.packet.chat;
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.api.proxy.crypto.IdentifiedKey;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
-import com.velocitypowered.proxy.crypto.EncryptionUtils;
 import com.velocitypowered.proxy.crypto.HeaderData;
 import com.velocitypowered.proxy.crypto.SignaturePair;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import io.netty.buffer.ByteBuf;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class ServerPlayerChatHeader implements MinecraftPacket {
 
@@ -57,7 +57,7 @@ public class ServerPlayerChatHeader implements MinecraftPacket {
    *
    * @return The {@link HeaderData}
    */
-  public HeaderData getHeaderData() {
-    return new HeaderData(header, headerSignature, dataHash);
+  public HeaderData getHeaderData(IdentifiedKey signer) {
+    return new HeaderData(header, headerSignature, dataHash, signer);
   }
 }

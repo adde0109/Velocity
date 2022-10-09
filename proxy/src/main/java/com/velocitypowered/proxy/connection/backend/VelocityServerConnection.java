@@ -25,6 +25,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.api.proxy.ServerConnection;
+import com.velocitypowered.api.proxy.crypto.IdentifiedKey;
 import com.velocitypowered.api.proxy.messages.ChannelIdentifier;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.proxy.server.ServerInfo;
@@ -37,6 +38,7 @@ import com.velocitypowered.proxy.connection.MinecraftConnectionAssociation;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.registry.DimensionRegistry;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
+import com.velocitypowered.proxy.crypto.VelocitySecurityProfile;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.packet.Handshake;
 import com.velocitypowered.proxy.protocol.packet.PluginMessage;
@@ -45,7 +47,7 @@ import com.velocitypowered.proxy.server.VelocityRegisteredServer;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
-import java.net.InetSocketAddress;
+
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
@@ -68,6 +70,7 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
   private BackendConnectionPhase connectionPhase = BackendConnectionPhases.UNKNOWN;
   private final Map<Long, Long> pendingPings = new HashMap<>();
   private @MonotonicNonNull DimensionRegistry activeDimensionRegistry;
+  private VelocitySecurityProfile velocityChatSecurityProfile = VelocitySecurityProfile.NO_SECURITY;
 
   /**
    * Initializes a new server connection.
@@ -190,7 +193,9 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
 
     mc.setProtocolVersion(protocolVersion);
     mc.setState(StateRegistry.LOGIN);
-    mc.delayedWrite(new ServerLogin(proxyPlayer.getUsername(), proxyPlayer.getIdentifiedKey()));
+    IdentifiedKey key = proxyPlayer.getSignedChatTracker().getPlayerSupported() == VelocitySecurityProfile.Mode.DISABLED
+            ? null : proxyPlayer.getIdentifiedKey();
+    mc.delayedWrite(new ServerLogin(proxyPlayer.getUsername(), key));
     mc.flush();
   }
 
@@ -340,5 +345,9 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
 
   public void setActiveDimensionRegistry(DimensionRegistry activeDimensionRegistry) {
     this.activeDimensionRegistry = activeDimensionRegistry;
+  }
+
+  public VelocitySecurityProfile getSecurityInfo() {
+    return velocityChatSecurityProfile;
   }
 }

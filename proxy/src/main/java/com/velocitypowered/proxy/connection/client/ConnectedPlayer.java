@@ -23,6 +23,7 @@ import static java.util.concurrent.CompletableFuture.completedFuture;
 
 import com.google.common.base.Preconditions;
 import com.google.gson.JsonObject;
+import com.velocitypowered.api.chat.SecurityProfile;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.DisconnectEvent.LoginStatus;
 import com.velocitypowered.api.event.player.KickedFromServerEvent;
@@ -66,7 +67,6 @@ import com.velocitypowered.proxy.protocol.packet.HeaderAndFooter;
 import com.velocitypowered.proxy.protocol.packet.KeepAlive;
 import com.velocitypowered.proxy.protocol.packet.PluginMessage;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackRequest;
-import com.velocitypowered.proxy.protocol.packet.ServerData;
 import com.velocitypowered.proxy.protocol.packet.chat.ChatBuilder;
 import com.velocitypowered.proxy.protocol.packet.chat.ChatQueue;
 import com.velocitypowered.proxy.protocol.packet.chat.LegacyChat;
@@ -167,13 +167,12 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
       .build();
   private @Nullable String clientBrand;
   private @Nullable Locale effectiveLocale;
-  private @Nullable IdentifiedKey playerKey;
   private ChatQueue chatQueue;
-  private @MonotonicNonNull ServerData currentServerData;
   private @MonotonicNonNull ChatTracker signedChatTracker;
 
   ConnectedPlayer(VelocityServer server, GameProfile profile, MinecraftConnection connection,
-                  @Nullable InetSocketAddress virtualHost, boolean onlineMode, @Nullable IdentifiedKey playerKey) {
+                  @Nullable InetSocketAddress virtualHost, boolean onlineMode,
+                  @Nullable IdentifiedKey playerKey, SecurityProfile securityProfile) {
     this.server = server;
     this.profile = profile;
     this.connection = connection;
@@ -188,9 +187,8 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
     } else {
       this.tabList = new VelocityTabListLegacy(this, server);
     }
-    this.playerKey = playerKey;
     this.chatQueue = new ChatQueue(this);
-    this.signedChatTracker = ChatTracker.forKey(playerKey);
+    this.signedChatTracker = ChatTracker.forKey(playerKey, securityProfile);
   }
 
   ChatQueue getChatQueue() {
@@ -1098,7 +1096,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
 
   @Override
   public @Nullable IdentifiedKey getIdentifiedKey() {
-    return playerKey;
+    return signedChatTracker.getIdentifiedKey();
   }
 
   private class IdentityImpl implements Identity {
@@ -1236,15 +1234,7 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
     }
   }
 
-  public ServerData getCurrentServerData() {
-    return currentServerData;
-  }
-
-  public void setCurrentServerData(ServerData currentServerData) {
-    this.currentServerData = currentServerData;
-  }
-
-  public @Nullable ChatTracker getSignedChatTracker() {
+  public ChatTracker getSignedChatTracker() {
     return signedChatTracker;
   }
 }

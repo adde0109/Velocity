@@ -20,7 +20,9 @@ package com.velocitypowered.proxy.protocol.packet.chat;
 import com.google.common.hash.Hashing;
 import com.google.common.hash.HashingOutputStream;
 import com.velocitypowered.api.network.ProtocolVersion;
+import com.velocitypowered.api.proxy.crypto.IdentifiedKey;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
+import com.velocitypowered.proxy.crypto.EncryptionUtils;
 import com.velocitypowered.proxy.crypto.HeaderData;
 import com.velocitypowered.proxy.crypto.SignaturePair;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
@@ -124,7 +126,7 @@ public class ServerPlayerChat implements MinecraftPacket {
   public boolean handle(MinecraftSessionHandler handler) {
     return handler.handle(this);
   }
-  
+
   // Another magic network registry for no reason.
   static enum FilterType {
     NONE,
@@ -137,13 +139,22 @@ public class ServerPlayerChat implements MinecraftPacket {
    *
    * @return The {@link HeaderData} or null if unsigned
    */
-  public HeaderData getHeaderData() {
+  public @Nullable HeaderData getHeaderData(IdentifiedKey signer) {
     if (headerSignature.length > 0) {
-      return new HeaderData(header, headerSignature, contentHash());
+      return new HeaderData(header, headerSignature, contentHash(), signer);
     }
     return null;
   }
 
+  public void removeSecurityInfo() {
+    header = new SignaturePair(header.getSigner());
+    headerSignature = EncryptionUtils.EMPTY;
+
+    previewed = null;
+    expiry = Instant.now();
+    salt = 0L;
+    lastSeen = new SignaturePair[0];
+  }
 
   private byte[] contentHash() {
     HashingOutputStream hashStream = new HashingOutputStream(Hashing.sha256(), OutputStream.nullOutputStream());
