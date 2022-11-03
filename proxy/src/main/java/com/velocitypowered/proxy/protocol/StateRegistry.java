@@ -39,6 +39,8 @@ import static com.velocitypowered.api.network.ProtocolVersion.MINIMUM_VERSION;
 import static com.velocitypowered.api.network.ProtocolVersion.SUPPORTED_VERSIONS;
 import static com.velocitypowered.proxy.protocol.ProtocolUtils.Direction;
 
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSet;
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.proxy.protocol.packet.AvailableCommands;
 import com.velocitypowered.proxy.protocol.packet.BossBar;
@@ -70,7 +72,11 @@ import com.velocitypowered.proxy.protocol.packet.chat.LegacyChat;
 import com.velocitypowered.proxy.protocol.packet.chat.PlayerChat;
 import com.velocitypowered.proxy.protocol.packet.chat.PlayerChatCompletion;
 import com.velocitypowered.proxy.protocol.packet.chat.PlayerCommand;
+import com.velocitypowered.proxy.protocol.packet.chat.ServerPlayerChat;
+import com.velocitypowered.proxy.protocol.packet.chat.ServerPlayerChatHeader;
 import com.velocitypowered.proxy.protocol.packet.chat.SystemChat;
+import com.velocitypowered.proxy.protocol.packet.custom.ChatSyncResponsePacket;
+import com.velocitypowered.proxy.protocol.packet.custom.ModernForwardingPacket;
 import com.velocitypowered.proxy.protocol.packet.title.LegacyTitlePacket;
 import com.velocitypowered.proxy.protocol.packet.title.TitleActionbarPacket;
 import com.velocitypowered.proxy.protocol.packet.title.TitleClearPacket;
@@ -82,11 +88,8 @@ import io.netty.util.collection.IntObjectHashMap;
 import io.netty.util.collection.IntObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
-import java.util.Collections;
-import java.util.EnumMap;
-import java.util.EnumSet;
-import java.util.Map;
-import java.util.Objects;
+
+import java.util.*;
 import java.util.function.Supplier;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -338,6 +341,10 @@ public enum StateRegistry {
       clientbound.register(ServerData.class, ServerData::new,
           map(0x3F, MINECRAFT_1_19, false),
           map(0x42, MINECRAFT_1_19_1, false));
+      clientbound.register(ServerPlayerChatHeader.class, ServerPlayerChatHeader::new,
+          map(0x32, MINECRAFT_1_19_1, false));
+      clientbound.register(ServerPlayerChat.class, ServerPlayerChat::new,
+          map(0x33, MINECRAFT_1_19_1, false));
     }
   },
   LOGIN {
@@ -347,6 +354,7 @@ public enum StateRegistry {
       serverbound.register(EncryptionResponse.class, EncryptionResponse::new,
           map(0x01, MINECRAFT_1_7_2, false));
       serverbound.register(LoginPluginResponse.class, LoginPluginResponse::new,
+          ImmutableSet.of(ModernForwardingPacket.class, ChatSyncResponsePacket.class),
           map(0x02, MINECRAFT_1_13, false));
       clientbound.register(Disconnect.class, Disconnect::new,
           map(0x00, MINECRAFT_1_7_2, false));
@@ -397,7 +405,13 @@ public enum StateRegistry {
     }
 
     <P extends MinecraftPacket> void register(Class<P> clazz, Supplier<P> packetSupplier,
-        PacketMapping... mappings) {
+                                              PacketMapping... mappings) {
+      register(clazz, packetSupplier, null, mappings);
+    }
+
+    <P extends MinecraftPacket> void register(Class<P> clazz, Supplier<P> packetSupplier,
+                                              @Nullable Collection<Class<? extends P>> permittedEncodes,
+                                              PacketMapping... mappings) {
       if (mappings.length == 0) {
         throw new IllegalArgumentException("At least one mapping must be provided.");
       }
@@ -452,6 +466,19 @@ public enum StateRegistry {
             registry.packetIdToSupplier.put(current.id, packetSupplier);
           }
           registry.packetClassToId.put(clazz, current.id);
+
+          if (permittedEncodes != null) {
+            for (Class<? extends P> toAdd : permittedEncodes) {
+              Class<?> parent = toAdd;
+              while(clazz != parent) {
+                Preconditions.checkArgument(parent != Object.class, "Not a packet child class!");
+                Preconditions.checkNotNull(parent, "Parent class not found");
+                parent = parent.getSuperclass();
+              }
+              Preconditions.checkArgument(registry.packetClassToId.put(toAdd, current.id) == 0,
+                      "Packet already registered");
+            }
+          }
         }
       }
     }

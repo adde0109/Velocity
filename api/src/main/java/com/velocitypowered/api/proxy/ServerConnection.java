@@ -7,6 +7,7 @@
 
 package com.velocitypowered.api.proxy;
 
+import com.velocitypowered.api.chat.DialogBroker;
 import com.velocitypowered.api.proxy.messages.ChannelMessageSink;
 import com.velocitypowered.api.proxy.messages.ChannelMessageSource;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
@@ -16,7 +17,7 @@ import java.util.Optional;
 /**
  * Represents a connection to a backend server from the proxy for a client.
  */
-public interface ServerConnection extends ChannelMessageSource, ChannelMessageSink {
+public interface ServerConnection extends ChannelMessageSource, ChannelMessageSink, DialogBroker {
 
   /**
    * Returns the server that this connection is connected to.

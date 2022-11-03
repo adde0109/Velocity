@@ -18,43 +18,61 @@
 package com.velocitypowered.proxy.connection.backend;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSet;
+import com.velocitypowered.api.chat.SecurityProfile;
+import com.velocitypowered.api.event.permission.PermissionsSetupEvent;
 import com.velocitypowered.api.event.player.ServerLoginPluginMessageEvent;
+import com.velocitypowered.api.event.player.ServerSecuritySetupEvent;
 import com.velocitypowered.api.network.ProtocolVersion;
+import com.velocitypowered.api.permission.PermissionFunction;
 import com.velocitypowered.api.proxy.crypto.IdentifiedKey;
 import com.velocitypowered.api.proxy.messages.MinecraftChannelIdentifier;
 import com.velocitypowered.api.util.GameProfile;
 import com.velocitypowered.proxy.VelocityServer;
+import com.velocitypowered.proxy.chat.SharedCustody;
 import com.velocitypowered.proxy.config.PlayerInfoForwarding;
 import com.velocitypowered.proxy.config.VelocityConfiguration;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.connection.VelocityConstants;
+import com.velocitypowered.proxy.connection.client.AuthSessionHandler;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
+import com.velocitypowered.proxy.crypto.ChatTracker;
+import com.velocitypowered.proxy.crypto.SignaturePair;
+import com.velocitypowered.proxy.crypto.VelocitySecurityProfile;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.packet.Disconnect;
 import com.velocitypowered.proxy.protocol.packet.EncryptionRequest;
 import com.velocitypowered.proxy.protocol.packet.LoginPluginMessage;
 import com.velocitypowered.proxy.protocol.packet.LoginPluginResponse;
+import com.velocitypowered.proxy.protocol.packet.ServerData;
 import com.velocitypowered.proxy.protocol.packet.ServerLoginSuccess;
 import com.velocitypowered.proxy.protocol.packet.SetCompression;
+import com.velocitypowered.proxy.protocol.packet.custom.ChatSyncResponsePacket;
+import com.velocitypowered.proxy.protocol.packet.custom.ModernForwardingPacket;
 import com.velocitypowered.proxy.util.except.QuietRuntimeException;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.Unpooled;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import javax.crypto.Mac;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class LoginSessionHandler implements MinecraftSessionHandler {
 
+  private static final Logger logger = LogManager.getLogger(LoginSessionHandler.class);
   private static final Component MODERN_IP_FORWARDING_FAILURE = Component
       .translatable("velocity.error.modern-forwarding-failed");
 
@@ -62,6 +80,7 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
   private final VelocityServerConnection serverConn;
   private final CompletableFuture<Impl> resultFuture;
   private boolean informationForwarded;
+  private @Nullable SecurityProfile synchronizedProfile = null;
 
   LoginSessionHandler(VelocityServer server, VelocityServerConnection serverConn,
       CompletableFuture<Impl> resultFuture) {
@@ -79,41 +98,32 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
   public boolean handle(LoginPluginMessage packet) {
     MinecraftConnection mc = serverConn.ensureConnected();
     VelocityConfiguration configuration = server.getConfiguration();
-    if (configuration.getPlayerInfoForwardingMode() == PlayerInfoForwarding.MODERN
-        && packet.getChannel().equals(VelocityConstants.VELOCITY_IP_FORWARDING_CHANNEL)) {
-
-      int requestedForwardingVersion = VelocityConstants.MODERN_FORWARDING_DEFAULT;
-      // Check version
-      if (packet.content().readableBytes() == 1) {
-        requestedForwardingVersion = packet.content().readByte();
-      }
-      ByteBuf forwardingData = createForwardingData(configuration.getForwardingSecret(),
-          serverConn.getPlayerRemoteAddressAsString(), serverConn.getPlayer(), requestedForwardingVersion);
-
-      LoginPluginResponse response = new LoginPluginResponse(packet.getId(), true, forwardingData);
-      mc.write(response);
-      informationForwarded = true;
-    } else {
-      // Don't understand, fire event if we have subscribers
-      if (!this.server.getEventManager().hasSubscribers(ServerLoginPluginMessageEvent.class)) {
-        mc.write(new LoginPluginResponse(packet.getId(), false, Unpooled.EMPTY_BUFFER));
-        return true;
-      }
-
-      final byte[] contents = ByteBufUtil.getBytes(packet.content());
-      final MinecraftChannelIdentifier identifier = MinecraftChannelIdentifier
-          .from(packet.getChannel());
-      this.server.getEventManager().fire(new ServerLoginPluginMessageEvent(serverConn, identifier,
-          contents, packet.getId()))
-          .thenAcceptAsync(event -> {
-            if (event.getResult().isAllowed()) {
-              mc.write(new LoginPluginResponse(packet.getId(), true, Unpooled
-                  .wrappedBuffer(event.getResult().getResponse())));
-            } else {
-              mc.write(new LoginPluginResponse(packet.getId(), false, Unpooled.EMPTY_BUFFER));
-            }
-          }, mc.eventLoop());
+    switch (packet.getChannel()) {
+      case VelocityConstants.VELOCITY_IP_FORWARDING_CHANNEL:
+        return handleModernForwarding(packet, configuration, mc);
+      case VelocityConstants.CHAT_SYNC_CHANNEL:
+        return handleChatForwarding(packet, configuration, mc);
+      default:
+        // Don't understand, fire event if we have subscribers
+        if (!this.server.getEventManager().hasSubscribers(ServerLoginPluginMessageEvent.class)) {
+          mc.write(new LoginPluginResponse(packet.getId(), false, Unpooled.EMPTY_BUFFER));
+          return true;
+        }
     }
+
+    final byte[] contents = ByteBufUtil.getBytes(packet.content());
+    final MinecraftChannelIdentifier identifier = MinecraftChannelIdentifier
+        .from(packet.getChannel());
+    this.server.getEventManager().fire(new ServerLoginPluginMessageEvent(serverConn, identifier,
+        contents, packet.getId()))
+        .thenAcceptAsync(event -> {
+          if (event.getResult().isAllowed()) {
+            mc.write(new LoginPluginResponse(packet.getId(), true, Unpooled
+                .wrappedBuffer(event.getResult().getResponse())));
+          } else {
+            mc.write(new LoginPluginResponse(packet.getId(), false, Unpooled.EMPTY_BUFFER));
+          }
+        }, mc.eventLoop());
     return true;
   }
 
@@ -173,77 +183,83 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
     }
   }
 
-  private static int findForwardingVersion(int requested, ConnectedPlayer player) {
-    // Ensure we are in range
-    requested = Math.min(requested, VelocityConstants.MODERN_FORWARDING_MAX_VERSION);
-    if (requested > VelocityConstants.MODERN_FORWARDING_DEFAULT) {
-      if (player.getIdentifiedKey() != null) {
-        // No enhanced switch on java 11
-        switch (player.getIdentifiedKey().getKeyRevision()) {
-          case GENERIC_V1:
-            return VelocityConstants.MODERN_FORWARDING_WITH_KEY;
-          // Since V2 is not backwards compatible we have to throw the key if v2 and requested is v1
-          case LINKED_V2:
-            return requested >= VelocityConstants.MODERN_FORWARDING_WITH_KEY_V2
-                  ? VelocityConstants.MODERN_FORWARDING_WITH_KEY_V2 : VelocityConstants.MODERN_FORWARDING_DEFAULT;
-          default:
-            return VelocityConstants.MODERN_FORWARDING_DEFAULT;
+
+  private boolean handleChatForwarding(LoginPluginMessage packet, VelocityConfiguration configuration,
+                                       MinecraftConnection mc) {
+    ConnectedPlayer who = serverConn.getPlayer();
+    ByteBuf content = packet.content();
+
+    int version = ProtocolUtils.readVarInt(content);
+    SecurityProfile.Mode selectedMode = SecurityProfile.Mode.values()[ProtocolUtils.readVarInt(content)];
+    ImmutableSet.Builder<SharedCustody> syncFeaturesBuilder = ImmutableSet.builder();
+    if (content.readBoolean()) {
+      int count = ProtocolUtils.readVarInt(content);
+      for (int i = 0; i < count; i++) {
+        SharedCustody cf = SharedCustody.read(content);
+        if (!cf.isUnknown()) {
+          syncFeaturesBuilder.add(cf);
         }
-      } else {
-        return VelocityConstants.MODERN_FORWARDING_DEFAULT;
+
       }
     }
-    return VelocityConstants.MODERN_FORWARDING_DEFAULT;
+    Set<SharedCustody> syncFeatures = syncFeaturesBuilder.build();
+
+    ChatTracker playerTracker = who.getSignedChatTracker();
+    SecurityProfile proposed = new VelocitySecurityProfile()
+
+    if (who.getSignedChatTracker().getSecurityProfile().getSelectedMode() != SecurityProfile.Mode.DISABLED) {
+
+      ServerSecuritySetupEvent securitySetupEvent = new ServerSecuritySetupEvent(serverConn, serverConn.getProfile());
+      server.getEventManager().fire(securitySetupEvent).thenAcceptAsync(setupEvent -> {
+        if (mc.isClosed()) {
+          return;
+        }
+
+        if (setupEvent.getResult().isAllowed()) {
+          synchronizedProfile = setupEvent.getResult().getSecurityProfile();
+          mc.write(new ChatSyncResponsePacket(packet.getId(), 1, setupEvent.getResult().getSecurityProfile(), null));
+        } else {
+          synchronizedProfile = null;
+          mc.write(new LoginPluginResponse(packet.getId(), false, Unpooled.EMPTY_BUFFER));
+        }
+
+      }, mc.eventLoop()).exceptionally(throwable -> {
+        logger.error("Exception during chat security setup of {}", serverConn, throwable);
+        mc.eventLoop().execute(() -> {
+          if (!mc.isClosed()) {
+            mc.write(new LoginPluginResponse(packet.getId(), false, Unpooled.EMPTY_BUFFER));
+          }
+        });
+        return null;
+      });
+    } else {
+      mc.write(new LoginPluginResponse(packet.getId(), false, Unpooled.EMPTY_BUFFER));
+    }
+
+
+    return true;
   }
 
-  private static ByteBuf createForwardingData(byte[] hmacSecret, String address,
-                                              ConnectedPlayer player, int requestedVersion) {
-    ByteBuf forwarded = Unpooled.buffer(2048);
-    try {
-      int actualVersion = findForwardingVersion(requestedVersion, player);
 
-      ProtocolUtils.writeVarInt(forwarded, actualVersion);
-      ProtocolUtils.writeString(forwarded, address);
-      ProtocolUtils.writeUuid(forwarded, player.getGameProfile().getId());
-      ProtocolUtils.writeString(forwarded, player.getGameProfile().getName());
-      ProtocolUtils.writeProperties(forwarded, player.getGameProfile().getProperties());
-
-      // This serves as additional redundancy. The key normally is stored in the
-      // login start to the server, but some setups require this.
-      if (actualVersion >= VelocityConstants.MODERN_FORWARDING_WITH_KEY) {
-        IdentifiedKey key = player.getIdentifiedKey();
-        assert key != null;
-        ProtocolUtils.writePlayerKey(forwarded, key);
-
-        // Provide the signer UUID since the UUID may differ from the
-        // assigned UUID. Doing that breaks the signatures anyway but the server
-        // should be able to verify the key independently.
-        if (actualVersion >= VelocityConstants.MODERN_FORWARDING_WITH_KEY_V2) {
-          if (key.getSignatureHolder() != null) {
-            forwarded.writeBoolean(true);
-            ProtocolUtils.writeUuid(forwarded, key.getSignatureHolder());
-          } else {
-            // Should only not be provided if the player was connected
-            // as offline-mode and the signer UUID was not backfilled
-            forwarded.writeBoolean(false);
-          }
-        }
+  private boolean handleModernForwarding(LoginPluginMessage packet, VelocityConfiguration configuration,
+                                         MinecraftConnection mc) {
+    if (configuration.getPlayerInfoForwardingMode() == PlayerInfoForwarding.MODERN) {
+      int requestedForwardingVersion = VelocityConstants.MODERN_FORWARDING_DEFAULT;
+      // Check version
+      if (packet.content().readableBytes() == 1) {
+        requestedForwardingVersion = packet.content().readByte();
       }
+      ConnectedPlayer player = serverConn.getPlayer();
 
-      SecretKey key = new SecretKeySpec(hmacSecret, "HmacSHA256");
-      Mac mac = Mac.getInstance("HmacSHA256");
-      mac.init(key);
-      mac.update(forwarded.array(), forwarded.arrayOffset(), forwarded.readableBytes());
-      byte[] sig = mac.doFinal();
+      ModernForwardingPacket response = new ModernForwardingPacket(packet.getId(), requestedForwardingVersion,
+              configuration.getForwardingSecret(), player.getIdentifiedKey(),
+              serverConn.getPlayerRemoteAddressAsString(), player.getGameProfile());
 
-      return Unpooled.wrappedBuffer(Unpooled.wrappedBuffer(sig), forwarded);
-    } catch (InvalidKeyException e) {
-      forwarded.release();
-      throw new RuntimeException("Unable to authenticate data", e);
-    } catch (NoSuchAlgorithmException e) {
-      // Should never happen
-      forwarded.release();
-      throw new AssertionError(e);
+      mc.write(response);
+      informationForwarded = true;
+    } else {
+      mc.write(new LoginPluginResponse(packet.getId(), false, Unpooled.EMPTY_BUFFER));
     }
+    return true;
   }
 }
