@@ -78,7 +78,7 @@ public class ServerLoginSuccess implements MinecraftPacket {
   public void decode(ByteBuf buf, ProtocolUtils.Direction direction, ProtocolVersion version) {
     if (version.compareTo(ProtocolVersion.MINECRAFT_1_19) >= 0) {
       uuid = ProtocolUtils.readUuid(buf);
-    } else if (version.compareTo(ProtocolVersion.MINECRAFT_1_16) >= 0) {
+    } else if (version.compareTo(ProtocolVersion.MINECRAFT_20w14_INFINITE) >= 0) {
       uuid = ProtocolUtils.readUuidIntArray(buf);
     } else if (version.compareTo(ProtocolVersion.MINECRAFT_1_7_6) >= 0) {
       uuid = UUID.fromString(ProtocolUtils.readString(buf, 36));
@@ -99,7 +99,7 @@ public class ServerLoginSuccess implements MinecraftPacket {
     }
     if (version.compareTo(ProtocolVersion.MINECRAFT_1_19) >= 0) {
       ProtocolUtils.writeUuid(buf, uuid);
-    } else if (version.compareTo(ProtocolVersion.MINECRAFT_1_16) >= 0) {
+    } else if (version.compareTo(ProtocolVersion.MINECRAFT_20w14_INFINITE) >= 0) {
       ProtocolUtils.writeUuidIntArray(buf, uuid);
     } else if (version.compareTo(ProtocolVersion.MINECRAFT_1_7_6) >= 0) {
       ProtocolUtils.writeString(buf, uuid.toString());
