@@ -179,6 +179,7 @@ public enum StateRegistry {
           map(0x09, MINECRAFT_1_19_1, false),
           map(0x08, MINECRAFT_1_19_3, false),
           map(0x09, MINECRAFT_1_19_4, false));
+          map(0x0A, MINECRAFT_1_20_2, false));
       serverbound.register(LegacyChat.class, LegacyChat::new,
           map(0x01, MINECRAFT_1_7_2, false),
           map(0x02, MINECRAFT_1_9, false),
@@ -205,6 +206,7 @@ public enum StateRegistry {
           map(0x08, MINECRAFT_1_19_1, false),
           map(0x07, MINECRAFT_1_19_3, false),
           map(0x08, MINECRAFT_1_19_4, false));
+          map(0x09, MINECRAFT_1_20_2, false));
       serverbound.register(PluginMessage.class, PluginMessage::new,
           map(0x17, MINECRAFT_1_7_2, false),
           map(0x09, MINECRAFT_1_9, false),
@@ -243,7 +245,7 @@ public enum StateRegistry {
           map(0x23, MINECRAFT_1_19, false),
           map(0x24, MINECRAFT_1_19_1, false),
           map(0x26, MINECRAFT_1_20_2, false));
-      serverbound.register(FinishedUpdate.class, FinishedUpdate::new,
+      serverbound.register(StartUpdate.class, StartUpdate::new,
           map(0x0B, MINECRAFT_1_20_2, false));
 
       clientbound.register(BossBar.class, BossBar::new,
@@ -449,7 +451,7 @@ public enum StateRegistry {
       clientbound.register(UpsertPlayerInfo.class, UpsertPlayerInfo::new,
           map(0x36, MINECRAFT_1_19_3, false),
           map(0x3A, MINECRAFT_1_19_4, false),
-          map(0x3B, MINECRAFT_1_20_2, false));
+          map(0x3C, MINECRAFT_1_20_2, false));
       clientbound.register(SystemChat.class, SystemChat::new,
           map(0x5F, MINECRAFT_1_19, true),
           map(0x62, MINECRAFT_1_19_1, true),
