@@ -27,6 +27,7 @@ import com.velocitypowered.proxy.config.VelocityConfiguration;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.connection.VelocityConstants;
+import com.velocitypowered.proxy.connection.client.ClientPlaySessionHandler;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
@@ -154,11 +155,18 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
     if (smc.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_20_2) < 0) {
       smc.setActiveSessionHandler(StateRegistry.PLAY, new TransitionSessionHandler(server, serverConn, resultFuture));
     } else {
-      smc.write(new LoginAcknowledged());
-      //Enforce the right session handler, player can already have this handler activated from before.
-      serverConn.getPlayer().getConnection().setActiveSessionHandler(StateRegistry.CONFIG);
-      //Sync backend and player to the same state
-      smc.setActiveSessionHandler(StateRegistry.CONFIG, new ConfigSessionHandler(server, serverConn, resultFuture));
+      CompletableFuture<Void> switchFuture;
+      if (serverConn.getPlayer().getConnection().getActiveSessionHandler() instanceof ClientPlaySessionHandler) {
+        switchFuture = ((ClientPlaySessionHandler) serverConn.getPlayer().getConnection().getActiveSessionHandler())
+                .doSwitch();
+      } else {
+        switchFuture = CompletableFuture.completedFuture(null);
+      }
+      switchFuture.thenAcceptAsync((unused) -> {
+        smc.write(new LoginAcknowledged());
+        //Sync backend
+        smc.setActiveSessionHandler(StateRegistry.CONFIG, new ConfigSessionHandler(server, serverConn, resultFuture));
+      }, smc.eventLoop());
     }
 
     return true;

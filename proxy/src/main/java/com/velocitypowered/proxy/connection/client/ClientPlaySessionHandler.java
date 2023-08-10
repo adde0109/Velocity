@@ -80,6 +80,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Queue;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -104,6 +105,8 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   private final ChatHandler<? extends MinecraftPacket> chatHandler;
   private final CommandHandler<? extends MinecraftPacket> commandHandler;
   private final ChatTimeKeeper timeKeeper = new ChatTimeKeeper();
+
+  private CompletableFuture<Void> configSwitchFuture;
 
   /**
    * Constructs a client play session handler.
@@ -151,6 +154,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public void activated() {
+    configSwitchFuture = new CompletableFuture<>();
     Collection<String> channels = server.getChannelRegistrar()
         .getChannelsForProtocol(player.getProtocolVersion());
     if (!channels.isEmpty()) {
@@ -164,9 +168,6 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   public void deactivated() {
     for (PluginMessage message : loginPluginMessages) {
       ReferenceCountUtil.release(message);
-    }
-    if (player.getProtocolVersion().compareTo(MINECRAFT_1_20_2) >= 0) {
-      player.getConnection().write(new StartUpdate());
     }
   }
 
@@ -385,20 +386,9 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(StartUpdate packet) {
-    VelocityServerConnection serverConnection = player.getConnectedServer();
-    Preconditions.checkState(serverConnection != null, "Invalid server packet received from broken handler");
-
-    MinecraftConnection smc = serverConnection.getConnection();
-    MinecraftConnection pmc = player.getConnection();
-    assert smc != null;
-    smc.setAutoReading(false);
-    smc.setActiveSessionHandler(StateRegistry.CONFIG);
-    pmc.write(packet);
-    pmc.setAutoReading(false);
-    pmc.setActiveSessionHandler(StateRegistry.CONFIG);
-    pmc.setAutoReading(true);
-    smc.setAutoReading(true);
-
+    //Complete client switch
+    player.getConnection().setActiveSessionHandler(StateRegistry.CONFIG);
+    configSwitchFuture.complete(null);
     return true;
   }
 
@@ -464,6 +454,26 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
       }
     }
   }
+
+  public CompletableFuture<Void> doSwitch() {
+    VelocityServerConnection existingConnection = player.getConnectedServer();
+
+    if (existingConnection != null) {
+      // Shut down the existing server connection.
+      player.setConnectedServer(null);
+      existingConnection.disconnect();
+
+      // Send keep alive to try to avoid timeouts
+      player.sendKeepAlive();
+
+      // Reset Tablist header and footer to prevent desync
+      player.clearHeaderAndFooter();
+    }
+
+    player.getConnection().write(new StartUpdate());
+    return configSwitchFuture;
+  }
+
 
   /**
    * Handles the {@code JoinGame} packet. This function is responsible for handling the client-side

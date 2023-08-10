@@ -34,7 +34,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Future;
 
 public class ClientConfigSessionHandler implements MinecraftSessionHandler {
 
@@ -42,7 +41,7 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
   private final VelocityServer server;
   private final ConnectedPlayer player;
 
-  private final CompletableFuture<Void> playerFinished = new CompletableFuture<>();
+  private CompletableFuture<Void> configSwitchFuture;
 
 
   /**
@@ -59,7 +58,7 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public void activated() {
-
+  configSwitchFuture = new CompletableFuture<>();
   }
 
   @Override
@@ -103,7 +102,7 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
     player.getConnection().setActiveSessionHandler(StateRegistry.PLAY,
             new ClientPlaySessionHandler(server, player));
 
-    playerFinished.complete(null);
+    configSwitchFuture.complete(null);
 
     return true;
   }
@@ -152,7 +151,7 @@ public class ClientConfigSessionHandler implements MinecraftSessionHandler {
 
   public CompletableFuture<Void> handleBackendFinishUpdate(VelocityServerConnection serverConn) {
     player.getConnection().write(new FinishedUpdate());
-    return playerFinished;
+    return configSwitchFuture;
   }
 
 }

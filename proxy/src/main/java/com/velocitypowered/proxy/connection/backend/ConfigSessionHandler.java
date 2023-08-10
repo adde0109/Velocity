@@ -24,10 +24,7 @@ import com.velocitypowered.proxy.VelocityServer;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.connection.client.ClientConfigSessionHandler;
-import com.velocitypowered.proxy.connection.client.ClientPlaySessionHandler;
-import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.player.VelocityResourcePackInfo;
-import com.velocitypowered.proxy.connection.registry.ClientConfigData;
 import com.velocitypowered.proxy.connection.util.ConnectionMessages;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
@@ -38,11 +35,8 @@ import com.velocitypowered.proxy.protocol.packet.KeepAlive;
 import com.velocitypowered.proxy.protocol.packet.PluginMessage;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackRequest;
 import com.velocitypowered.proxy.protocol.packet.ResourcePackResponse;
-import com.velocitypowered.proxy.protocol.packet.config.ActiveFeatures;
 import com.velocitypowered.proxy.protocol.packet.config.FinishedUpdate;
 import com.velocitypowered.proxy.protocol.packet.config.RegistrySync;
-import com.velocitypowered.proxy.protocol.packet.config.StartUpdate;
-import com.velocitypowered.proxy.protocol.packet.config.TagsUpdate;
 import com.velocitypowered.proxy.protocol.util.PluginMessageUtil;
 import jdk.jfr.Experimental;
 import net.kyori.adventure.text.Component;
@@ -88,7 +82,6 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public void deactivated() {
-    serverConn.ensureConnected().write(new FinishedUpdate());
   }
 
   @Override
@@ -148,15 +141,15 @@ public class ConfigSessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(FinishedUpdate packet) {
-    final MinecraftConnection connection = serverConn.ensureConnected();
 
      ClientConfigSessionHandler configHandler =
              (ClientConfigSessionHandler) serverConn.getPlayer().getConnection().getActiveSessionHandler();
 
-     configHandler.handleBackendFinishUpdate(serverConn).whenComplete((unused, throwable) -> {
+     configHandler.handleBackendFinishUpdate(serverConn).thenAcceptAsync((unused) -> {
+       serverConn.ensureConnected().write(new FinishedUpdate());
                serverConn.ensureConnected().setActiveSessionHandler(StateRegistry.PLAY,
                        new TransitionSessionHandler(server, serverConn, resultFuture));
-             });
+             }, serverConn.ensureConnected().eventLoop());
     return true;
   }
 
