@@ -17,11 +17,10 @@
 
 package com.velocitypowered.proxy.connection.client;
 
-import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_13;
-import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_16;
-import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_8;
+import static com.velocitypowered.api.network.ProtocolVersion.*;
 import static com.velocitypowered.proxy.protocol.util.PluginMessageUtil.constructChannelsPacket;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.mojang.brigadier.suggestion.Suggestion;
 import com.velocitypowered.api.command.VelocityBrigadierMessage;
@@ -67,6 +66,7 @@ import com.velocitypowered.proxy.protocol.packet.chat.session.SessionChatHandler
 import com.velocitypowered.proxy.protocol.packet.chat.session.SessionCommandHandler;
 import com.velocitypowered.proxy.protocol.packet.chat.session.SessionPlayerChat;
 import com.velocitypowered.proxy.protocol.packet.chat.session.SessionPlayerCommand;
+import com.velocitypowered.proxy.protocol.packet.config.StartUpdate;
 import com.velocitypowered.proxy.protocol.packet.title.GenericTitlePacket;
 import com.velocitypowered.proxy.protocol.util.PluginMessageUtil;
 import com.velocitypowered.proxy.util.CharacterUtil;
@@ -164,6 +164,9 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   public void deactivated() {
     for (PluginMessage message : loginPluginMessages) {
       ReferenceCountUtil.release(message);
+    }
+    if (player.getProtocolVersion().compareTo(MINECRAFT_1_20_2) >= 0) {
+      player.getConnection().write(new StartUpdate());
     }
   }
 
@@ -381,6 +384,25 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
   }
 
   @Override
+  public boolean handle(StartUpdate packet) {
+    VelocityServerConnection serverConnection = player.getConnectedServer();
+    Preconditions.checkState(serverConnection != null, "Invalid server packet received from broken handler");
+
+    MinecraftConnection smc = serverConnection.getConnection();
+    MinecraftConnection pmc = player.getConnection();
+    assert smc != null;
+    smc.setAutoReading(false);
+    smc.setActiveSessionHandler(StateRegistry.CONFIG);
+    pmc.write(packet);
+    pmc.setAutoReading(false);
+    pmc.setActiveSessionHandler(StateRegistry.CONFIG);
+    pmc.setAutoReading(true);
+    smc.setAutoReading(true);
+
+    return true;
+  }
+
+  @Override
   public void handleGeneric(MinecraftPacket packet) {
     VelocityServerConnection serverConnection = player.getConnectedServer();
     if (serverConnection == null) {
@@ -487,7 +509,7 @@ public class ClientPlaySessionHandler implements MinecraftSessionHandler {
 
     // Tell the server about this client's plugin message channels.
     ProtocolVersion serverVersion = serverMc.getProtocolVersion();
-    if (!player.getKnownChannels().isEmpty()) {
+    if (!player.getKnownChannels().isEmpty() && serverVersion.compareTo(MINECRAFT_1_20_2) < 0) {
       serverMc.delayedWrite(constructChannelsPacket(serverVersion, player.getKnownChannels()));
     }
 

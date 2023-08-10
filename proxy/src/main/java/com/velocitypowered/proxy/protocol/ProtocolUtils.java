@@ -41,6 +41,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.nbt.BinaryTagIO;
 import net.kyori.adventure.nbt.CompoundBinaryTag;
 import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer;
@@ -219,6 +221,52 @@ public enum ProtocolUtils {
     buf.writeCharSequence(str, StandardCharsets.UTF_8);
   }
 
+  /**
+   * Reads a standard Mojang Text namespaced:key from the buffer.
+   *
+   * @param buf the buffer to read from
+   * @return the decoded key
+   */
+  public static Key readKey(ByteBuf buf) {
+    return Key.key(readString(buf), Key.DEFAULT_SEPARATOR);
+  }
+
+  /**
+   * Writes a standard Mojang Text namespaced:key to the buffer.
+   *
+   * @param buf the buffer to write to
+   * @param key the key to write
+   */
+  public static void writeKey(ByteBuf buf, Key key) {
+    writeString(buf, key.asString());
+  }
+
+  /**
+   * Reads a standard Mojang Text namespaced:key array from the buffer.
+   *
+   * @param buf the buffer to read from
+   * @return the decoded key array
+   */
+  public static Key[] readKeyArray(ByteBuf buf) {
+    Key[] ret = new Key[readVarInt(buf)];
+    for (int i = 0; i < ret.length; i++) {
+      ret[i] = ProtocolUtils.readKey(buf);
+    }
+    return ret;
+  }
+
+  /**
+   * Writes a standard Mojang Text namespaced:key array to the buffer.
+   *
+   * @param buf the buffer to write to
+   * @param keys the keys to write
+   */
+  public static void writeKeyArray(ByteBuf buf, Key[] keys) {
+    writeVarInt(buf, keys.length);
+    for (Key key : keys) {
+      writeKey(buf, key);
+    }
+  }
   public static byte[] readByteArray(ByteBuf buf) {
     return readByteArray(buf, DEFAULT_MAX_STRING_SIZE);
   }

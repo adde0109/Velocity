@@ -202,9 +202,11 @@ public class JoinGame implements MinecraftPacket {
 
   @Override
   public void decode(ByteBuf buf, ProtocolUtils.Direction direction, ProtocolVersion version) {
-    if (version.compareTo(ProtocolVersion.MINECRAFT_1_16) >= 0) {
-      // Minecraft 1.16 and above have significantly more complicated logic for reading this packet,
-      // so separate it out.
+    if (version.compareTo(ProtocolVersion.MINECRAFT_1_20_2) >= 0) {
+      // Minecraft 1.16, 1.20.1 and above have significantly more complicated logic for reading this packet,
+      // so separate them out.
+      this.decode1202Up(buf, version);
+    } else if (version.compareTo(ProtocolVersion.MINECRAFT_1_16) >= 0) {
       this.decode116Up(buf, version);
     } else {
       this.decodeLegacy(buf, version);
@@ -295,11 +297,45 @@ public class JoinGame implements MinecraftPacket {
     }
   }
 
+  private void decode1202Up(ByteBuf buf, ProtocolVersion version) {
+    this.entityId = buf.readInt();
+    this.isHardcore = buf.readBoolean();
+
+    this.levelNames = ImmutableSet.copyOf(ProtocolUtils.readStringArray(buf));
+
+    this.maxPlayers = ProtocolUtils.readVarInt(buf);
+
+    this.viewDistance = ProtocolUtils.readVarInt(buf);
+    this.simulationDistance = ProtocolUtils.readVarInt(buf);
+
+    this.reducedDebugInfo = buf.readBoolean();
+    this.showRespawnScreen = buf.readBoolean();
+
+    String dimensionIdentifier = ProtocolUtils.readString(buf);
+    String levelName = ProtocolUtils.readString(buf);
+    this.partialHashedSeed = buf.readLong();
+
+    this.gamemode = buf.readByte();
+    this.previousGamemode = buf.readByte();
+
+    boolean isDebug = buf.readBoolean();
+    boolean isFlat = buf.readBoolean();
+    this.dimensionInfo = new DimensionInfo(dimensionIdentifier, levelName, isFlat, isDebug);
+
+    // optional death location
+    if (buf.readBoolean())
+      this.lastDeathPosition = Pair.of(ProtocolUtils.readString(buf), buf.readLong());
+
+    this.portalCooldown = ProtocolUtils.readVarInt(buf);
+  }
+
   @Override
   public void encode(ByteBuf buf, ProtocolUtils.Direction direction, ProtocolVersion version) {
-    if (version.compareTo(ProtocolVersion.MINECRAFT_1_16) >= 0) {
-      // Minecraft 1.16 and above have significantly more complicated logic for reading this packet,
-      // so separate it out.
+    if (version.compareTo(ProtocolVersion.MINECRAFT_1_20_2) >= 0) {
+      // Minecraft 1.16, 1.20.2 and above have significantly more complicated logic for reading this packet,
+      // so separate them out.
+      this.encode1202Up(buf, version);
+    } else if (version.compareTo(ProtocolVersion.MINECRAFT_1_16) >= 0){
       this.encode116Up(buf, version);
     } else {
       this.encodeLegacy(buf, version);
@@ -394,6 +430,42 @@ public class JoinGame implements MinecraftPacket {
     if (version.compareTo(ProtocolVersion.MINECRAFT_1_20) >= 0) {
       ProtocolUtils.writeVarInt(buf, portalCooldown);
     }
+  }
+
+  private void encode1202Up(ByteBuf buf, ProtocolVersion version) {
+    buf.writeInt(entityId);
+    buf.writeBoolean(isHardcore);
+
+    ProtocolUtils.writeStringArray(buf, levelNames.toArray(String[]::new));
+
+    ProtocolUtils.writeVarInt(buf, maxPlayers);
+
+    ProtocolUtils.writeVarInt(buf, viewDistance);
+    ProtocolUtils.writeVarInt(buf, simulationDistance);
+
+    buf.writeBoolean(reducedDebugInfo);
+    buf.writeBoolean(showRespawnScreen);
+
+    ProtocolUtils.writeString(buf, dimensionInfo.getRegistryIdentifier());
+    ProtocolUtils.writeString(buf, dimensionInfo.getLevelName());
+    buf.writeLong(partialHashedSeed);
+
+    buf.writeByte(gamemode);
+    buf.writeByte(previousGamemode);
+
+    buf.writeBoolean(dimensionInfo.isDebugType());
+    buf.writeBoolean(dimensionInfo.isFlat());
+
+    // optional death location
+    if (lastDeathPosition != null) {
+      buf.writeBoolean(true);
+      ProtocolUtils.writeString(buf, lastDeathPosition.key());
+      buf.writeLong(lastDeathPosition.value());
+    } else {
+      buf.writeBoolean(false);
+    }
+
+    ProtocolUtils.writeVarInt(buf, portalCooldown);
   }
 
   @Override

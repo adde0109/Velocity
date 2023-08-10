@@ -165,7 +165,7 @@ public enum LegacyForgeHandshakeClientPhase implements ClientConnectionPhase {
       // just in case the timing is awful
       player.sendKeepAlive();
 
-      MinecraftSessionHandler handler = backendConn.getSessionHandler();
+      MinecraftSessionHandler handler = backendConn.getActiveSessionHandler();
       if (handler instanceof ClientPlaySessionHandler) {
         ((ClientPlaySessionHandler) handler).flushQueuedMessages();
       }

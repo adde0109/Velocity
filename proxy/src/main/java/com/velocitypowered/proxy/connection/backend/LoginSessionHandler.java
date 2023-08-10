@@ -34,6 +34,7 @@ import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.packet.Disconnect;
 import com.velocitypowered.proxy.protocol.packet.EncryptionRequest;
+import com.velocitypowered.proxy.protocol.packet.LoginAcknowledged;
 import com.velocitypowered.proxy.protocol.packet.LoginPluginMessage;
 import com.velocitypowered.proxy.protocol.packet.LoginPluginResponse;
 import com.velocitypowered.proxy.protocol.packet.ServerLoginSuccess;
@@ -150,10 +151,16 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
 
     // Move into the PLAY phase.
     MinecraftConnection smc = serverConn.ensureConnected();
-    smc.setState(StateRegistry.PLAY);
+    if (smc.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_20_2) < 0) {
+      smc.setActiveSessionHandler(StateRegistry.PLAY, new TransitionSessionHandler(server, serverConn, resultFuture));
+    } else {
+      smc.write(new LoginAcknowledged());
+      //Enforce the right session handler, player can already have this handler activated from before.
+      serverConn.getPlayer().getConnection().setActiveSessionHandler(StateRegistry.CONFIG);
+      //Sync backend and player to the same state
+      smc.setActiveSessionHandler(StateRegistry.CONFIG, new ConfigSessionHandler(server, serverConn, resultFuture));
+    }
 
-    // Switch to the transition handler.
-    smc.setSessionHandler(new TransitionSessionHandler(server, serverConn, resultFuture));
     return true;
   }
 

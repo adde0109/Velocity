@@ -60,7 +60,7 @@ public class PingSessionHandler implements MinecraftSessionHandler {
     handshake.setProtocolVersion(version);
     connection.delayedWrite(handshake);
 
-    connection.setState(StateRegistry.STATUS);
+    connection.setActiveSessionHandler(StateRegistry.STATUS);
     connection.delayedWrite(StatusRequest.INSTANCE);
 
     connection.flush();

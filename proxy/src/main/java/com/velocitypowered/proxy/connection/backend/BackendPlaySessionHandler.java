@@ -66,7 +66,6 @@ import org.apache.logging.log4j.Logger;
  */
 public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
-  private static final Pattern PLAUSIBLE_SHA1_HASH = Pattern.compile("^[a-z0-9]{40}$");
   private static final Logger logger = LogManager.getLogger(BackendPlaySessionHandler.class);
   private static final boolean BACKPRESSURE_LOG = Boolean
       .getBoolean("velocity.log-server-backpressure");
@@ -86,7 +85,7 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
     this.serverConn = serverConn;
     this.playerConnection = serverConn.getPlayer().getConnection();
 
-    MinecraftSessionHandler psh = playerConnection.getSessionHandler();
+    MinecraftSessionHandler psh = playerConnection.getActiveSessionHandler();
     if (!(psh instanceof ClientPlaySessionHandler)) {
       throw new IllegalStateException(
           "Initializing BackendPlaySessionHandler with no backing client play session handler!");
@@ -103,9 +102,10 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
     if (server.getConfiguration().isBungeePluginChannelEnabled()) {
       MinecraftConnection serverMc = serverConn.ensureConnected();
-      serverMc.write(PluginMessageUtil.constructChannelsPacket(serverMc.getProtocolVersion(),
-          ImmutableList.of(getBungeeCordChannel(serverMc.getProtocolVersion()))
-      ));
+      if (serverMc.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_20_2) < 0)
+        serverMc.write(PluginMessageUtil.constructChannelsPacket(serverMc.getProtocolVersion(),
+            ImmutableList.of(getBungeeCordChannel(serverMc.getProtocolVersion()))
+        ));
     }
   }
 
@@ -144,21 +144,8 @@ public class BackendPlaySessionHandler implements MinecraftSessionHandler {
 
   @Override
   public boolean handle(ResourcePackRequest packet) {
-    ResourcePackInfo.Builder builder = new VelocityResourcePackInfo.BuilderImpl(
-        Preconditions.checkNotNull(packet.getUrl()))
-        .setPrompt(packet.getPrompt())
-        .setShouldForce(packet.isRequired())
-        .setOrigin(ResourcePackInfo.Origin.DOWNSTREAM_SERVER);
-
-    String hash = packet.getHash();
-    if (hash != null && !hash.isEmpty()) {
-      if (PLAUSIBLE_SHA1_HASH.matcher(hash).matches()) {
-        builder.setHash(ByteBufUtil.decodeHexDump(hash));
-      }
-    }
-
     ServerResourcePackSendEvent event = new ServerResourcePackSendEvent(
-        builder.build(), this.serverConn);
+        packet.toServerPromptedPack(), this.serverConn);
 
     server.getEventManager().fire(event).thenAcceptAsync(serverResourcePackSendEvent -> {
       if (playerConnection.isClosed()) {

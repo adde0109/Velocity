@@ -99,7 +99,10 @@ public class ServerLogin implements MinecraftPacket {
       }
 
       if (version.compareTo(ProtocolVersion.MINECRAFT_1_19_1) >= 0) {
-        if (buf.readBoolean()) {
+        if (version.compareTo(ProtocolVersion.MINECRAFT_1_20_2) >= 0) {
+          holderUuid = ProtocolUtils.readUuid(buf);
+        }
+        else if (buf.readBoolean()) {
           holderUuid = ProtocolUtils.readUuid(buf);
         }
       }
@@ -130,7 +133,8 @@ public class ServerLogin implements MinecraftPacket {
           buf.writeBoolean(true);
           ProtocolUtils.writeUuid(buf, playerKey.getSignatureHolder());
         } else if (this.holderUuid != null) {
-          buf.writeBoolean(true);
+          if (version.compareTo(ProtocolVersion.MINECRAFT_1_20_2) < 0)
+            buf.writeBoolean(true);
           ProtocolUtils.writeUuid(buf, this.holderUuid);
         } else {
           buf.writeBoolean(false);

@@ -17,58 +17,71 @@
 
 package com.velocitypowered.proxy.protocol.packet.config;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
+import com.velocitypowered.proxy.connection.registry.DataTag;
 import com.velocitypowered.proxy.protocol.MinecraftPacket;
 import com.velocitypowered.proxy.protocol.ProtocolUtils;
 import io.netty.buffer.ByteBuf;
+import net.kyori.adventure.key.Key;
 
+import java.util.List;
 import java.util.Map;
 
 public class TagsUpdate implements MinecraftPacket {
 
-  private Map<String, Map<String, int[]>> tags;
+  private DataTag tag;
 
-  public TagsUpdate(Map<String, Map<String, int[]>> tags) {
-    this.tags = tags;
+  public TagsUpdate(DataTag tag) {
+    this.tag = tag;
   }
 
   public TagsUpdate() {
-    this.tags = Map.of();
+    this.tag = new DataTag(ImmutableList.of());
+  }
+
+  public DataTag getTag() {
+    return tag;
+  }
+
+  public void setTag(DataTag tag) {
+    this.tag = tag;
   }
 
   @Override
   public void decode(ByteBuf buf, ProtocolUtils.Direction direction, ProtocolVersion protocolVersion) {
-    ImmutableMap.Builder<String, Map<String, int[]>> builder = ImmutableMap.builder();
+    ImmutableList.Builder<DataTag.Set> entrySet = ImmutableList.builder();
+
     int size = ProtocolUtils.readVarInt(buf);
     for (int i = 0; i < size; i++) {
-      String key = ProtocolUtils.readString(buf);
+      Key setkey = ProtocolUtils.readKey(buf);
 
       int innerSize = ProtocolUtils.readVarInt(buf);
-      ImmutableMap.Builder<String, int[]> innerBuilder = ImmutableMap.builder();
+      ImmutableList.Builder<DataTag.Entry> innerBuilder = ImmutableList.builder();
       for (int j = 0; j < innerSize; j++) {
-        String innerKey = ProtocolUtils.readString(buf);
-        int[] innerValue = ProtocolUtils.readVarIntArray(buf);
-        innerBuilder.put(innerKey, innerValue);
+        innerBuilder.add(new DataTag.Entry(
+            ProtocolUtils.readKey(buf),
+            ProtocolUtils.readVarIntArray(buf))
+        );
       }
 
-      builder.put(key, innerBuilder.build());
+      entrySet.add(new DataTag.Set(setkey, innerBuilder.build()));
     }
-    tags = builder.build();
+    tag = new DataTag(entrySet.build());
   }
 
   @Override
   public void encode(ByteBuf buf, ProtocolUtils.Direction direction, ProtocolVersion protocolVersion) {
-    ProtocolUtils.writeVarInt(buf, tags.size());
-    for (Map.Entry<String, Map<String, int[]>> entry : tags.entrySet()) {
-      ProtocolUtils.writeString(buf, entry.getKey());
-      // Oh, joy
-      ProtocolUtils.writeVarInt(buf, entry.getValue().size());
-      for (Map.Entry<String, int[]> innerEntry : entry.getValue().entrySet()) {
-        // Yea, object oriented programming be damned
-        ProtocolUtils.writeString(buf, innerEntry.getKey());
-        ProtocolUtils.writeVarIntArray(buf, innerEntry.getValue());
+    ProtocolUtils.writeVarInt(buf, tag.getEntrySets().size());
+    for (DataTag.Set set : tag.getEntrySets()) {
+      ProtocolUtils.writeKey(buf, set.key());
+
+      ProtocolUtils.writeVarInt(buf, set.getEntries().size());
+      for (DataTag.Entry entry : set.getEntries()) {
+        ProtocolUtils.writeKey(buf, entry.key());
+        ProtocolUtils.writeVarIntArray(buf, entry.getElements());
       }
     }
   }

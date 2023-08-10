@@ -1073,6 +1073,13 @@ public class ConnectedPlayer implements MinecraftConnectionAssociation, Player, 
   }
 
   /**
+   * Gives an indication about the previous resource pack responses.
+   */
+  public @Nullable Boolean getPreviousResourceResponse() {
+    return previousResourceResponse;
+  }
+
+  /**
    * Sends a {@link KeepAlive} packet to the player with a random ID. The response will be ignored
    * by Velocity as it will not match the ID last sent by the server.
    */

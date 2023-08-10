@@ -26,6 +26,7 @@ import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.permission.PermissionsSetupEvent;
 import com.velocitypowered.api.event.player.GameProfileRequestEvent;
 import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent;
+import com.velocitypowered.api.network.ProtocolVersion;
 import com.velocitypowered.api.permission.PermissionFunction;
 import com.velocitypowered.api.proxy.crypto.IdentifiedKey;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
@@ -38,8 +39,10 @@ import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.crypto.IdentifiedKeyImpl;
 import com.velocitypowered.proxy.protocol.StateRegistry;
+import com.velocitypowered.proxy.protocol.packet.LoginAcknowledged;
 import com.velocitypowered.proxy.protocol.packet.ServerLoginSuccess;
 import com.velocitypowered.proxy.protocol.packet.SetCompression;
+import com.velocitypowered.proxy.protocol.packet.config.StartUpdate;
 import io.netty.buffer.ByteBuf;
 import java.util.Objects;
 import java.util.Optional;
@@ -64,6 +67,7 @@ public class AuthSessionHandler implements MinecraftSessionHandler {
   private GameProfile profile;
   private @MonotonicNonNull ConnectedPlayer connectedPlayer;
   private final boolean onlineMode;
+  private State loginState = State.START; // 1.20.2+
 
   AuthSessionHandler(VelocityServer server, LoginInboundConnection inbound,
       GameProfile profile, boolean onlineMode) {
@@ -118,7 +122,7 @@ public class AuthSessionHandler implements MinecraftSessionHandler {
               } else {
                 player.setPermissionFunction(function);
               }
-              completeLoginProtocolPhaseAndInitialize(player);
+              startLoginCompletion(player);
             }
           }, mcConnection.eventLoop());
     }, mcConnection.eventLoop()).exceptionally((ex) -> {
@@ -127,7 +131,7 @@ public class AuthSessionHandler implements MinecraftSessionHandler {
     });
   }
 
-  private void completeLoginProtocolPhaseAndInitialize(ConnectedPlayer player) {
+  private void startLoginCompletion(ConnectedPlayer player) {
     int threshold = server.getConfiguration().getCompressionThreshold();
     if (threshold >= 0 && mcConnection.getProtocolVersion().compareTo(MINECRAFT_1_8) >= 0) {
       mcConnection.write(new SetCompression(threshold));
@@ -171,8 +175,27 @@ public class AuthSessionHandler implements MinecraftSessionHandler {
     success.setUuid(playerUniqueId);
     mcConnection.write(success);
 
+    if (inbound.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_20_2) < 0) {
+      completeLoginProtocolPhaseAndInitialize(player);
+    } else {
+      loginState = State.SUCCESS_SENT;
+    }
+  }
+
+  @Override
+  public boolean handle(LoginAcknowledged packet) {
+    if (loginState != State.SUCCESS_SENT) {
+      inbound.disconnect(
+          Component.translatable("multiplayer.disconnect.invalid_player_data"));
+    } else {
+      loginState = State.ACKNOWLEDGED;
+      completeLoginProtocolPhaseAndInitialize(connectedPlayer);
+    }
+    return true;
+  }
+
+  private void completeLoginProtocolPhaseAndInitialize(ConnectedPlayer player) {
     mcConnection.setAssociation(player);
-    mcConnection.setState(StateRegistry.PLAY);
 
     server.getEventManager().fire(new LoginEvent(player))
         .thenAcceptAsync(event -> {
@@ -193,7 +216,12 @@ public class AuthSessionHandler implements MinecraftSessionHandler {
               return;
             }
 
-            mcConnection.setSessionHandler(new InitialConnectSessionHandler(player, server));
+            if (inbound.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_20_2) > 0) {
+              mcConnection.setActiveSessionHandler(StateRegistry.PLAY, new InitialConnectSessionHandler(player, server));
+            } else {
+              mcConnection.setActiveSessionHandler(StateRegistry.CONFIG, new ClientConfigSessionHandler(server, player));
+            }
+
             server.getEventManager().fire(new PostLoginEvent(player))
                 .thenCompose((ignored) -> connectToInitialServer(player))
                 .exceptionally((ex) -> {
@@ -236,5 +264,11 @@ public class AuthSessionHandler implements MinecraftSessionHandler {
       connectedPlayer.teardown();
     }
     this.inbound.cleanup();
+  }
+
+  static enum State {
+    START,
+    SUCCESS_SENT,
+    ACKNOWLEDGED
   }
 }

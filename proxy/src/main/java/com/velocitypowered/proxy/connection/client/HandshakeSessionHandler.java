@@ -67,7 +67,7 @@ public class HandshakeSessionHandler implements MinecraftSessionHandler {
     connection.setProtocolVersion(ProtocolVersion.LEGACY);
     StatusSessionHandler handler = new StatusSessionHandler(server,
         new LegacyInboundConnection(connection, packet));
-    connection.setSessionHandler(handler);
+    connection.setActiveSessionHandler(StateRegistry.STATUS ,handler);
     handler.handle(packet);
     return true;
   }
@@ -90,13 +90,12 @@ public class HandshakeSessionHandler implements MinecraftSessionHandler {
       LOGGER.error("{} provided invalid protocol {}", ic, handshake.getNextStatus());
       connection.close(true);
     } else {
-      connection.setState(nextState);
       connection.setProtocolVersion(handshake.getProtocolVersion());
       connection.setAssociation(ic);
 
       switch (nextState) {
         case STATUS:
-          connection.setSessionHandler(new StatusSessionHandler(server, ic));
+          connection.setActiveSessionHandler(StateRegistry.STATUS, new StatusSessionHandler(server, ic));
           break;
         case LOGIN:
           this.handleLogin(handshake, ic);
@@ -147,7 +146,7 @@ public class HandshakeSessionHandler implements MinecraftSessionHandler {
 
     LoginInboundConnection lic = new LoginInboundConnection(ic);
     server.getEventManager().fireAndForget(new ConnectionHandshakeEvent(lic));
-    connection.setSessionHandler(new InitialLoginSessionHandler(server, connection, lic));
+    connection.setActiveSessionHandler(StateRegistry.LOGIN, new InitialLoginSessionHandler(server, connection, lic));
   }
 
   private ConnectionType getHandshakeConnectionType(Handshake handshake) {

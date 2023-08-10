@@ -34,6 +34,7 @@ import com.velocitypowered.proxy.config.PlayerInfoForwarding;
 import com.velocitypowered.proxy.connection.ConnectionTypes;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftConnectionAssociation;
+import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.connection.client.ConnectedPlayer;
 import com.velocitypowered.proxy.connection.util.ConnectionRequestResults.Impl;
 import com.velocitypowered.proxy.protocol.StateRegistry;
@@ -108,8 +109,11 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
             future.channel().pipeline().addLast(HANDLER, connection);
 
             // Kick off the connection process
-            connection.setSessionHandler(
-                new LoginSessionHandler(server, VelocityServerConnection.this, result));
+            if (!connection.setActiveSessionHandler(StateRegistry.HANDSHAKE)) {
+              MinecraftSessionHandler handler = new LoginSessionHandler(server, VelocityServerConnection.this, result);
+              connection.setActiveSessionHandler(StateRegistry.HANDSHAKE, handler);
+              connection.addSessionHandler(StateRegistry.LOGIN, handler);
+            }
 
             // Set the connection phase, which may, for future forge (or whatever), be determined
             // at this point already
@@ -193,7 +197,7 @@ public class VelocityServerConnection implements MinecraftConnectionAssociation,
     mc.delayedWrite(handshake);
 
     mc.setProtocolVersion(protocolVersion);
-    mc.setState(StateRegistry.LOGIN);
+    mc.setActiveSessionHandler(StateRegistry.LOGIN);
     if (proxyPlayer.getIdentifiedKey() == null
         && proxyPlayer.getProtocolVersion().compareTo(ProtocolVersion.MINECRAFT_1_19_3) >= 0) {
       mc.delayedWrite(new ServerLogin(proxyPlayer.getUsername(), proxyPlayer.getUniqueId()));

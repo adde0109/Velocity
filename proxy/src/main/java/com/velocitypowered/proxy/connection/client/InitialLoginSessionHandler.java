@@ -34,6 +34,7 @@ import com.velocitypowered.proxy.VelocityServer;
 import com.velocitypowered.proxy.connection.MinecraftConnection;
 import com.velocitypowered.proxy.connection.MinecraftSessionHandler;
 import com.velocitypowered.proxy.crypto.IdentifiedKeyImpl;
+import com.velocitypowered.proxy.protocol.StateRegistry;
 import com.velocitypowered.proxy.protocol.netty.MinecraftDecoder;
 import com.velocitypowered.proxy.protocol.packet.EncryptionRequest;
 import com.velocitypowered.proxy.protocol.packet.EncryptionResponse;
@@ -150,7 +151,7 @@ public class InitialLoginSessionHandler implements MinecraftSessionHandler {
                 mcConnection.write(request);
                 this.currentState = LoginState.ENCRYPTION_REQUEST_SENT;
               } else {
-                mcConnection.setSessionHandler(new AuthSessionHandler(
+                mcConnection.setActiveSessionHandler(StateRegistry.LOGIN, new AuthSessionHandler(
                     server, inbound, GameProfile.forOfflinePlayer(login.getUsername()), false
                 ));
               }
@@ -246,7 +247,7 @@ public class InitialLoginSessionHandler implements MinecraftSessionHandler {
               }
             }
             // All went well, initialize the session.
-            mcConnection.setSessionHandler(new AuthSessionHandler(
+            mcConnection.setActiveSessionHandler(StateRegistry.LOGIN, new AuthSessionHandler(
                 server, inbound, profile, true
             ));
           } else if (profileResponse.getStatusCode() == 204) {
